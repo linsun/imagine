@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gemini Vision Transform</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen">
+  <div class="max-w-6xl mx-auto px-4 py-8">
+    <header class="mb-8">
+      <h1 class="text-3xl font-bold">
+        <span class="bg-gradient-to-r from-amber-400 to-rose-400 bg-clip-text text-transparent">Imagine Together</span>
+        <span>&#129782;</span>
+      </h1>
+    </header>
+
+    <div class="grid md:grid-cols-2 gap-6">
+      <!-- LEFT: source image -->
+      <section class="bg-slate-900 rounded-2xl p-5 border border-slate-800">
+        <div class="rounded-xl overflow-hidden bg-black aspect-video flex items-center justify-center mb-3">
+          <video id="video" autoplay playsinline class="w-full h-full object-cover hidden"></video>
+          <img id="capturedImg" class="w-full h-full object-contain hidden" />
+          <span id="cameraPlaceholder" class="text-slate-500 text-sm">Camera off &mdash; start the camera or upload an image</span>
+        </div>
+
+        <div class="flex flex-wrap gap-2">
+          <button id="startCam" class="px-3 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-sm font-medium">Start camera</button>
+          <button id="snap" class="px-3 py-2 rounded-lg bg-fuchsia-600 hover:bg-fuchsia-500 text-sm font-medium disabled:opacity-40 hidden" disabled>Take photo</button>
+          <button id="retake" class="px-3 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm font-medium hidden">Retake photo</button>
+          <button id="stopCam" class="px-3 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm font-medium disabled:opacity-40 hidden" disabled>Stop</button>
+          <label class="px-3 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm font-medium cursor-pointer">
+            Upload
+            <input id="upload" type="file" accept="image/*" class="hidden" />
+          </label>
+        </div>
+        <canvas id="canvas" class="hidden"></canvas>
+      </section>
+
+      <!-- RIGHT: animate to video -->
+      <section class="bg-slate-900 rounded-2xl p-5 border border-slate-800">
+        <label class="text-xs text-slate-400">Describe the motion / scene you want</label>
+        <textarea id="videoInstruction" rows="3"
+          class="w-full mt-1 mb-3 rounded-lg bg-slate-800 border border-slate-700 p-3 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+          placeholder="e.g. the camera slowly flies over the city as the lights turn on at dusk"></textarea>
+
+        <button id="animateBtn" class="w-full px-4 py-2 rounded-lg bg-gradient-to-r from-amber-500 to-rose-500 hover:opacity-90 font-medium disabled:opacity-40" disabled>
+          Transform
+        </button>
+        <p id="status" class="text-sm text-slate-400 mt-3 min-h-[1.25rem]"></p>
+      </section>
+    </div>
+
+    <!-- RESULT -->
+    <section class="mt-6 bg-slate-900 rounded-2xl p-5 border border-slate-800">
+      <h2 class="font-semibold text-lg mb-3">✨</h2>
+      <div class="relative">
+        <video id="afterVideo" controls autoplay loop playsinline class="rounded-xl w-full bg-black object-contain max-h-[28rem] hidden"></video>
+        <button id="playSound"
+          class="hidden absolute inset-0 m-auto h-14 w-fit px-5 rounded-full bg-amber-500 hover:bg-amber-400 text-slate-900 font-semibold shadow-lg flex items-center gap-2">
+          &#128266; Play with sound
+        </button>
+      </div>
+      <div id="afterEmpty" class="rounded-xl bg-black/40 h-48 flex items-center justify-center text-slate-600 text-sm">No video yet</div>
+    </section>
+  </div>
+
+  <script>
+    const state = { imageId: null, cameraReady: false };
+    const $ = (id) => document.getElementById(id);
+
+    const video = $("video");
+    const canvas = $("canvas");
+    let stream = null;
+
+    function setStatus(msg, busy = false) {
+      $("status").textContent = msg;
+      $("animateBtn").disabled = busy || !state.imageId;
+    }
+    // Show a still image (captured or uploaded) in the source area.
+    function showCaptured(url, fromCamera) {
+      $("capturedImg").src = url;
+      $("capturedImg").classList.remove("hidden");
+      video.classList.add("hidden");
+      $("cameraPlaceholder").classList.add("hidden");
+      $("snap").classList.add("hidden");
+      // Offer Retake only when a live camera is available.
+      $("retake").classList.toggle("hidden", !(fromCamera && state.cameraReady));
+      $("animateBtn").disabled = false;
+    }
+
+    function showVideoResult(url) {
+      const v = $("afterVideo");
+      const playSoundBtn = $("playSound");
+      v.src = url + "?t=" + Date.now();
+      v.muted = false;
+      v.volume = 1;
+      v.classList.remove("hidden");
+      v.load();
+      $("afterEmpty").classList.add("hidden");
+      playSoundBtn.classList.add("hidden");
+      // Try to play with sound. Browsers block unmuted autoplay when playback
+      // isn't tied to a user gesture (true here, since the video arrives after a
+      // long fetch). In that case, play muted so something shows, and reveal a
+      // "Play with sound" button -- clicking it counts as a gesture and unmutes.
+      v.play().catch(() => {
+        v.muted = true;
+        v.play().catch(() => {});
+        playSoundBtn.classList.remove("hidden");
+        setStatus("Video is muted by the browser — click \u201cPlay with sound\u201d to hear the audio.");
+      });
+    }
+
+    $("playSound").onclick = () => {
+      const v = $("afterVideo");
+      v.muted = false;
+      v.volume = 1;
+      v.currentTime = 0;
+      v.play();
+      $("playSound").classList.add("hidden");
+      setStatus("");
+    };
+
+    // ---- Camera ----
+    $("startCam").onclick = async () => {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        video.srcObject = stream;
+        state.cameraReady = true;
+        $("capturedImg").classList.add("hidden");
+        video.classList.remove("hidden");
+        $("cameraPlaceholder").classList.add("hidden");
+        $("snap").classList.remove("hidden");
+        $("snap").disabled = false;
+        $("retake").classList.add("hidden");
+        $("stopCam").classList.remove("hidden");
+        $("stopCam").disabled = false;
+      } catch (e) {
+        setStatus("Camera error: " + e.message);
+      }
+    };
+
+    $("stopCam").onclick = () => {
+      if (stream) stream.getTracks().forEach((t) => t.stop());
+      stream = null;
+      state.cameraReady = false;
+      video.classList.add("hidden");
+      $("snap").classList.add("hidden");
+      $("retake").classList.add("hidden");
+      $("stopCam").classList.add("hidden");
+      if ($("capturedImg").classList.contains("hidden")) {
+        $("cameraPlaceholder").classList.remove("hidden");
+      }
+    };
+
+    // Go back to the live feed to take another photo.
+    $("retake").onclick = () => {
+      $("capturedImg").classList.add("hidden");
+      $("retake").classList.add("hidden");
+      if (state.cameraReady) {
+        video.classList.remove("hidden");
+        $("snap").classList.remove("hidden");
+        $("snap").disabled = false;
+      } else {
+        $("cameraPlaceholder").classList.remove("hidden");
+      }
+    };
+
+    $("snap").onclick = async () => {
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      canvas.getContext("2d").drawImage(video, 0, 0);
+      const dataUrl = canvas.toDataURL("image/png");
+      setStatus("Saving capture...", true);
+      try {
+        const res = await fetch("/api/capture", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ image_b64: dataUrl }),
+        });
+        const data = await res.json();
+        state.imageId = data.image_id;
+        showCaptured(dataUrl, true);
+        setStatus("Photo captured. Describe a motion and click Animate.");
+      } catch (e) {
+        setStatus("Capture failed: " + e.message);
+      }
+    };
+
+    // ---- Upload ----
+    $("upload").onchange = async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      setStatus("Uploading...", true);
+      const form = new FormData();
+      form.append("file", file);
+      const res = await fetch("/api/upload", { method: "POST", body: form });
+      if (!res.ok) { setStatus("Upload failed."); return; }
+      const data = await res.json();
+      state.imageId = data.image_id;
+      showCaptured(data.url, false);
+      setStatus("Image uploaded!");
+    };
+
+    // ---- Animate to video ----
+    $("animateBtn").onclick = async () => {
+      if (!state.imageId) return;
+      const motionText = $("videoInstruction").value.trim();
+      if (!motionText) {
+        setStatus("Describe what you want the video to do first.");
+        return;
+      }
+      setStatus("Animating with Veo...please wait", true);
+      try {
+        const res = await fetch("/api/animate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            image_id: state.imageId,
+            instruction: motionText,
+            motion_preset: "",
+          }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          setStatus("Failed: " + (err.detail || res.status));
+          return;
+        }
+        const data = await res.json();
+        showVideoResult(data.url);
+        setStatus("");
+      } catch (e) {
+        setStatus("Error: " + e.message);
+      }
+    };
+  </script>
+</body>
+</html>

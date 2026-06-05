@@ -1,0 +1,6 @@
+fastapi==0.115.14
+uvicorn[standard]==0.34.3
+python-multipart==0.0.20
+google-genai==1.41.0
+mcp==1.27.2
+pillow==11.3.0
