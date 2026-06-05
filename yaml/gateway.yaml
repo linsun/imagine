@@ -5,11 +5,6 @@ metadata:
   namespace: default
 spec:
   gatewayClassName: agentgateway
-  infrastructure:
-    parametersRef:
-      group: agentgateway.dev
-      kind: AgentgatewayParameters
-      name: agentgateway
   listeners:
   - name: http
     protocol: HTTP
