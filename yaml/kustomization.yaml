@@ -8,4 +8,5 @@ resources:
   - mcp-server.yaml
   - backend.yaml
   - frontend.yaml
-  # - ingress.yaml
+  - gateway.yaml
+  - httproute.yaml
