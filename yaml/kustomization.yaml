@@ -8,6 +8,5 @@ resources:
   - mcp-server.yaml
   - backend.yaml
   - frontend.yaml
-  - frontend-v2.yaml
   - gateway.yaml
   - httproute.yaml
