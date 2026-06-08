@@ -10,4 +10,4 @@ spec:
   rules:
     - backendRefs:
         - name: frontend
-          port: 88
+          port: 80
