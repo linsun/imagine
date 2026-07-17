@@ -5,15 +5,18 @@ metadata:
   namespace: default
   labels:
     app: frontend
+    version: v1
 spec:
   replicas: 1
   selector:
     matchLabels:
       app: frontend
+      version: v1
   template:
     metadata:
       labels:
         app: frontend
+        version: v1
     spec:
       containers:
         - name: frontend
@@ -42,6 +45,7 @@ metadata:
 spec:
   selector:
     app: frontend
+    version: v1
   ports:
     - port: 80
       targetPort: 80
