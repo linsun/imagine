@@ -44,4 +44,4 @@ spec:
     app: frontend
   ports:
     - port: 80
-      targetPort: 88
+      targetPort: 80
