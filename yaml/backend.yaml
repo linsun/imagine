@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: backend
-          image: vision-backend:dev
+          image: linsun/vision-backend:v1
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080

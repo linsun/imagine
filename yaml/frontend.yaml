@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: frontend
-          image: vision-frontend:dev
+          image: linsun/vision-frontend:v1
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 80

@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: vision-mcp
-          image: vision-mcp:dev
+          image: linsun/vision-mcp:v1
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8000
