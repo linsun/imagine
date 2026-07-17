@@ -9,5 +9,9 @@ spec:
     namespace: default
   rules:
   - backendRefs:
+    - name: frontend-v2
+      port: 80
+      weight: 80
     - name: frontend
-      port: 88
+      port: 80
+      weight: 20
