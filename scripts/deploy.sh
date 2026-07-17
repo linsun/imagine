@@ -12,7 +12,7 @@ if [[ -f "${ROOT}/.env" ]]; then
   set -a; source "${ROOT}/.env"; set +a
 fi
 
-if [[ -z "${GEMINI_API_KEY:-}" ]]; then
+if [[ -z "${GOOGLE_API_KEY:-}" ]]; then
   echo "ERROR: GEMINI_API_KEY is not set (put it in .env or export it)." >&2
   exit 1
 fi
@@ -20,7 +20,7 @@ fi
 echo "Creating secret..."
 kubectl create secret generic gemini-secret \
   --namespace "${NS}" \
-  --from-literal=GEMINI_API_KEY="${GEMINI_API_KEY}" \
+  --from-literal=GEMINI_API_KEY="${GOOGLE_API_KEY}" \
   --dry-run=client -o yaml | kubectl apply -f -
 
 echo "Applying manifests..."
