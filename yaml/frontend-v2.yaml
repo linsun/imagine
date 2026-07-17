@@ -1,26 +1,26 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: frontend
+  name: frontend-v2
   namespace: default
   labels:
     app: frontend
-    version: v1
+    version: v2
 spec:
   replicas: 1
   selector:
     matchLabels:
       app: frontend
-      version: v1
+      version: v2
   template:
     metadata:
       labels:
         app: frontend
-        version: v1
+        version: v2
     spec:
       containers:
         - name: frontend
-          image: linsun/vision-frontend:v1
+          image: linsun/vision-frontend:kcdperu
           imagePullPolicy: Always
           ports:
             - containerPort: 80
@@ -40,12 +40,12 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: frontend
+  name: frontend-v2
   namespace: default
 spec:
   selector:
     app: frontend
-    version: v1
+    version: v2
   ports:
     - port: 80
       targetPort: 80
