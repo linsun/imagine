@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# imagine -- the AGNTCon + MCPCon Japan demo, from the repo root.
+#
+# The demo lives in keynote/ so this branch stays a clean diff against main,
+# which is still the imagine web app. This shim means you never have to type
+# that folder name -- on stage or anywhere else it is just:
+#
+#     ./imagine start
+#
+exec "$(dirname "$0")/keynote/imagine" "$@"

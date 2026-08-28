@@ -1,0 +1,7 @@
+openai==1.99.1
+mcp==1.27.2
+fastapi==0.115.14
+uvicorn[standard]==0.34.3
+httpx==0.28.1
+opentelemetry-sdk==1.29.0
+opentelemetry-exporter-otlp-proto-grpc==1.29.0

@@ -1,0 +1,318 @@
+#!/usr/bin/env python3
+"""imagine -- one command to run the AGNTCon + MCPCon demo.
+
+    ./imagine start        bring everything up, then open the Director
+    ./imagine status       what is running, and where
+    ./imagine down         stop everything
+
+`make` still works and does exactly the same things; this is the front door
+that does not require knowing that it is a Makefile underneath.
+
+Deliberately stdlib-only and deliberately thin: every subcommand shells out to
+the same scripts/*.sh that have been smoke-tested all week. This file adds a
+nicer surface, not a second implementation.
+
+Not a container, on purpose. The three things this demo does on stage -- open
+the MacBook camera, speak with `say`, and put a fullscreen window on the
+projector -- are all host-native on macOS and none of them survive being put in
+Docker. The backing services (gateway, Jaeger, the vision MCP server) could be
+containerised later; the camera and the projector cannot.
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import shutil
+import subprocess
+import sys
+import urllib.error
+import urllib.request
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+VENV_PY = os.path.join(HERE, ".venv", "bin", "python")
+ENV_FILE = os.path.join(HERE, ".env")
+
+BOLD, DIM, RED, YEL, GRN, OFF = (
+    "\033[1m", "\033[2m", "\033[31m", "\033[33m", "\033[32m", "\033[0m")
+
+
+def die(msg: str, hint: str = "") -> None:
+    print(f"{RED}!{OFF} {msg}", file=sys.stderr)
+    if hint:
+        print(f"  {DIM}{hint}{OFF}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def load_env() -> dict:
+    """Read .env the way the shell scripts do: KEY=value, # comments, no eval."""
+    env = dict(os.environ)
+    if not os.path.exists(ENV_FILE):
+        return env
+    with open(ENV_FILE, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            if line.startswith("export "):
+                line = line[7:]
+            key, _, val = line.partition("=")
+            key, val = key.strip(), val.strip()
+            if len(val) >= 2 and val[0] == val[-1] and val[0] in "\"'":
+                val = val[1:-1]          # quoted: keep it whole, comments and all
+            else:
+                # Unquoted: bash ends the value at whitespace and treats the
+                # rest as a comment. `GITHUB_REPO=linsun/imagine  # owner/repo`
+                # is `linsun/imagine`, not the sentence. Match that exactly, or
+                # this CLI and the shell scripts disagree about the same file.
+                cut = val.find(" #")
+                if cut == -1:
+                    cut = val.find("\t#")
+                if cut != -1:
+                    val = val[:cut].rstrip()
+            env[key] = val
+    return env
+
+
+def sh(script: str, *args: str) -> int:
+    """Run one of scripts/*.sh, streaming its output."""
+    path = os.path.join(HERE, "scripts", script)
+    if not os.path.exists(path):
+        die(f"missing {os.path.relpath(path, HERE)}")
+    return subprocess.call(["bash", path, *args], cwd=HERE)
+
+
+def need_venv() -> None:
+    if not os.access(VENV_PY, os.X_OK):
+        die("no virtualenv yet", "run: ./imagine install")
+
+
+def alive(url: str, timeout: float = 1.5) -> bool:
+    try:
+        with urllib.request.urlopen(url, timeout=timeout):
+            return True
+    except (urllib.error.URLError, OSError):
+        return False
+
+
+def running() -> list[tuple[str, int, bool]]:
+    """(name, pid, still alive) for every service up.sh started."""
+    out = []
+    pids = os.path.join(HERE, ".pids")
+    for name in sorted(os.listdir(pids)) if os.path.isdir(pids) else []:
+        try:
+            with open(os.path.join(pids, name), encoding="utf-8") as f:
+                pid = int(f.read().strip())
+        except (ValueError, OSError):
+            out.append((name, -1, False))
+            continue
+        try:
+            os.kill(pid, 0)          # signal 0 = "does this pid exist"
+            out.append((name, pid, True))
+        except PermissionError:
+            out.append((name, pid, True))   # exists, just not ours to signal
+        except OSError:
+            out.append((name, pid, False))
+    return out
+
+
+# --- commands --------------------------------------------------------------
+
+def cmd_install(_args) -> int:
+    subprocess.check_call([sys.executable, "-m", "venv", ".venv"], cwd=HERE)
+    pip = os.path.join(HERE, ".venv", "bin", "pip")
+    subprocess.check_call([pip, "install", "-q", "-U", "pip"], cwd=HERE)
+    subprocess.check_call(
+        [pip, "install", "-q",
+         "-r", "servers/requirements.txt",
+         "-r", "agent/requirements.txt",
+         "-r", "../mcp-server/requirements.txt"], cwd=HERE)
+    print(f"{GRN}ok{OFF}. now: cp .env.example .env && edit it")
+    return 0
+
+
+def cmd_up(_args) -> int:
+    need_venv()
+    return sh("up.sh")
+
+
+def cmd_down(_args) -> int:
+    return sh("down.sh")
+
+
+def cmd_demo(_args) -> int:
+    need_venv()
+    if not any(n == "agentgateway" and ok for n, _, ok in running()):
+        print(f"{YEL}!{OFF} the gateway is not running -- start it with "
+              f"{BOLD}./imagine up{OFF} (or use {BOLD}./imagine start{OFF})\n")
+    # -u so the step lines appear as they happen, not when the buffer flushes.
+    return subprocess.call([VENV_PY, "-u", "-m", "agent.director"],
+                           cwd=HERE, env=load_env())
+
+
+def cmd_start(args) -> int:
+    """The one command for the day: services, then the Director."""
+    need_venv()
+    rc = sh("up.sh")
+    if rc != 0:
+        die("services did not come up -- see logs/", "./imagine logs")
+    print()
+    rc = cmd_demo(args)
+    # Left running on purpose: quitting the Director mid-conference should not
+    # cost you a minute of restarting the gateway to try again.
+    print(f"\n{DIM}services are still up -- ./imagine demo to come back, "
+          f"./imagine down to stop them{OFF}")
+    return rc
+
+
+def cmd_verify(_args) -> int:
+    need_venv()
+    return sh("verify.sh")
+
+
+def cmd_preflight(_args) -> int:
+    return sh("preflight.sh")
+
+
+def cmd_jaeger(args) -> int:
+    return sh("jaeger.sh", args.action)
+
+
+def cmd_camera(args) -> int:
+    env = load_env()
+    port = env.get("PREVIEW_PORT", "8888")
+    path = "resume" if args.action == "on" else "release"
+    try:
+        with urllib.request.urlopen(f"http://localhost:{port}/{path}", timeout=5) as r:
+            print(r.read().decode("utf-8", "replace").strip())
+        return 0
+    except (urllib.error.URLError, OSError) as exc:
+        die(f"viewfinder not answering on :{port} ({exc})", "./imagine up")
+        return 1
+
+
+def cmd_status(_args) -> int:
+    env = load_env()
+    port = env.get("PREVIEW_PORT", "8888")
+    procs = running()
+    print(f"\n{BOLD}services{OFF}")
+    if not procs:
+        print(f"  {DIM}nothing started -- ./imagine up{OFF}")
+    for name, pid, ok in procs:
+        mark = f"{GRN}ok{OFF}" if ok else f"{RED}dead{OFF}"
+        print(f"  {mark:>14}  {name} {DIM}({pid}){OFF}")
+
+    print(f"\n{BOLD}endpoints{OFF}")
+    for label, url in (
+        ("viewfinder", f"http://localhost:{port}/"),
+        ("gateway (llm)", f"{env.get('AGW_LLM', 'http://localhost:3000')}/"),
+        ("jaeger", "http://localhost:16686/"),
+    ):
+        mark = f"{GRN}up{OFF}" if alive(url) else f"{DIM}--{OFF}"
+        print(f"  {mark:>14}  {label:<14} {DIM}{url}{OFF}")
+
+    print(f"\n{BOLD}the day-of bits{OFF}")
+    for label, path in (("backup recording", "backup/demo-recording.mp4"),
+                        ("fallback photos", "fallback")):
+        full = os.path.join(HERE, path)
+        if os.path.isdir(full):
+            n = len([f for f in os.listdir(full)
+                     if not f.startswith(".")]) if os.path.isdir(full) else 0
+            ok, detail = n > 0, f"{n} file(s)"
+        else:
+            ok = os.path.exists(full) and os.path.getsize(full) > 0
+            detail = f"{os.path.getsize(full) // 1024} KB" if ok else "empty"
+        mark = f"{GRN}ok{OFF}" if ok else f"{YEL}!!{OFF}"
+        print(f"  {mark:>14}  {label:<16} {DIM}{path} — {detail}{OFF}")
+    print()
+    return 0
+
+
+def cmd_logs(args) -> int:
+    logs = os.path.join(HERE, "logs")
+    if not os.path.isdir(logs):
+        die("no logs yet", "./imagine up")
+    files = [os.path.join(logs, f) for f in sorted(os.listdir(logs))
+             if f.endswith(".log")]
+    if args.service:
+        files = [f for f in files if args.service in os.path.basename(f)]
+        if not files:
+            die(f"no log for {args.service!r}")
+    if args.follow:
+        return subprocess.call(["tail", "-f", *files])
+    return subprocess.call(["tail", "-n", str(args.lines), *files])
+
+
+def cmd_clean(_args) -> int:
+    for path in ("outputs", "data.db", ".pids"):
+        full = os.path.join(HERE, path)
+        if os.path.isdir(full) and path != "outputs":
+            shutil.rmtree(full, ignore_errors=True)
+        elif os.path.isdir(full):
+            for f in os.listdir(full):
+                if not f.startswith("."):
+                    os.remove(os.path.join(full, f))
+        elif os.path.exists(full):
+            os.remove(full)
+    print("cleaned outputs, data.db, .pids")
+    return 0
+
+
+def main() -> int:
+    p = argparse.ArgumentParser(
+        prog="imagine", description=__doc__.split("\n")[0],
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=f"""
+{BOLD}the day{OFF}
+  ./imagine preflight        checks that have each bitten someone
+  ./imagine start            services + Director, one command
+  ./imagine down             stop everything
+
+{BOLD}in the Director{OFF}
+  you > launch the camera
+  you > take the photo, count down from 3
+  you > <describe the film>
+""")
+    sub = p.add_subparsers(dest="cmd")
+
+    def add(name, fn, help_):
+        s = sub.add_parser(name, help=help_)
+        s.set_defaults(fn=fn)
+        return s
+
+    add("install", cmd_install, "create the virtualenv and install deps")
+    add("start", cmd_start, "bring everything up, then open the Director")
+    add("up", cmd_up, "start the services only")
+    add("demo", cmd_demo, "open the Director (services must be up)")
+    add("down", cmd_down, "stop everything")
+    add("status", cmd_status, "what is running, and where")
+    add("verify", cmd_verify, "smoke-test every leg through the gateway")
+    add("preflight", cmd_preflight, "day-of checks")
+    add("clean", cmd_clean, "remove outputs, data.db, .pids")
+
+    s = add("camera", cmd_camera, "release or re-take the camera")
+    s.add_argument("action", choices=["on", "off"])
+
+    s = add("jaeger", cmd_jaeger, "start/stop Jaeger for the trace view")
+    s.add_argument("action", nargs="?", default="up", choices=["up", "down"])
+
+    s = add("logs", cmd_logs, "tail the service logs")
+    s.add_argument("service", nargs="?", help="e.g. agentgateway, viewfinder")
+    s.add_argument("-f", "--follow", action="store_true")
+    s.add_argument("-n", "--lines", type=int, default=40)
+
+    args = p.parse_args()
+    if not getattr(args, "fn", None):
+        p.print_help()
+        return 0
+    try:
+        return args.fn(args)
+    except KeyboardInterrupt:
+        return 130
+    except subprocess.CalledProcessError as exc:
+        die(f"{exc.cmd[0] if exc.cmd else 'command'} failed ({exc.returncode})")
+        return exc.returncode
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

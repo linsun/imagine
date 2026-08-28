@@ -1,0 +1,19 @@
+.venv/
+.pids/
+logs/
+outputs/
+data.db
+bin/agentgateway
+.env
+
+# --- never commit these -------------------------------------------------
+# .env.bak holds the same live tokens .env does. *.bak also covers the
+# rollback copies (tools.py.mcp1.bak, config.yaml.mcp1.bak) -- once this is
+# in git, history is the backup.
+*.bak
+__pycache__/
+*.pyc
+.DS_Store
+data.db-shm
+data.db-wal
+_to_delete/

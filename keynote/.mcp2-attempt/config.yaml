@@ -1,0 +1,134 @@
+# yaml-language-server: $schema=https://agentgateway.dev/schema/config
+frontendPolicies:
+  http:
+    maxBufferSize: 33554432
+  accessLog:
+    database:
+      llm: full
+config:
+  tracing:
+    otlpEndpoint: http://localhost:4317
+    randomSampling: true
+  database:
+    url: sqlite://./data.db?mode=rwc
+  modelCatalog:
+  - file: ./gateway/base-costs.json
+llm:
+  port: 3000
+  models:
+  - name: director-primary
+    visibility: internal
+    provider: gemini
+    params:
+      model: gemini-3.6-flash
+      apiKey: $GEMINI_API_KEY
+    health:
+      eviction:
+        consecutiveFailures: 2
+        duration: 30s
+  - name: director-fallback
+    visibility: internal
+    provider: openAI
+    params:
+      model: gpt-4o
+      apiKey: $OPENAI_API_KEY
+    health:
+      eviction:
+        consecutiveFailures: 2
+        duration: 30s
+  - name: nano-banana
+    visibility: public
+    provider: gemini
+    params:
+      model: gemini-2.5-flash-image
+  - name: gemini-2.5-flash-image
+    visibility: public
+    provider: gemini
+    params:
+      model: gemini-2.5-flash-image
+      apiKey: $GEMINI_API_KEY
+  virtualModels:
+  - name: director
+    routing:
+      failover:
+        targets:
+        - model: director-primary
+          priority: 0
+        - model: director-fallback
+          priority: 1
+  policies:
+    cors:
+      allowOrigins:
+      - http://localhost:15000
+      allowHeaders:
+      - '*'
+      allowMethods:
+      - GET
+      - POST
+mcp:
+  port: 3001
+  # MCP 2026-07-28 is stateless: no initialize handshake, no
+  # Mcp-Session-Id. Run the listener stateless so it accepts
+  # tools/list and tools/call directly instead of synthesising
+  # a legacy initialize.
+  # statefulMode: stateless   <- disabled while we isolate the large-response failure
+  failureMode: failOpen
+  targets:
+  - name: camera
+    stdio:
+      cmd: python
+      args:
+      - -m
+      - servers.camera_mcp
+  - name: stage
+    stdio:
+      cmd: python
+      args:
+      - -m
+      - servers.stage_mcp
+  - name: post
+    stdio:
+      cmd: python
+      args:
+      - -m
+      - servers.post_mcp
+  - name: publish
+    stdio:
+      cmd: python
+      args:
+      - -m
+      - servers.publish_mcp
+  - name: vision
+    mcp:
+      host: http://localhost:8000/mcp
+  policies:
+    cors:
+      allowOrigins:
+      - http://localhost:15000
+      allowHeaders:
+      - '*'
+      allowMethods:
+      - GET
+      - POST
+      exposeHeaders:
+      - Mcp-Session-Id
+gateways:
+  scout-gw:
+    port: 3002
+  dp-gw:
+    port: 3003
+routes:
+- name: scout
+  gateways:
+  - scout-gw
+  policies:
+    a2a: {}
+  backends:
+  - host: localhost:9101
+- name: dp
+  gateways:
+  - dp-gw
+  policies:
+    a2a: {}
+  backends:
+  - host: localhost:9102

@@ -1,0 +1,13 @@
+openai==1.99.1
+
+# MCP 2026-07-28 client. Brings httpx2 (the transport uses it) and starlette 1.x.
+mcp==2.1.1
+
+# starlette 1.x is why fastapi had to move: 0.115 pins starlette <0.42 and
+# collides with mcp 2.x. 0.141 is the first line that takes starlette 1.x.
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+
+httpx==0.28.1
+opentelemetry-sdk==1.29.0
+opentelemetry-exporter-otlp-proto-grpc==1.29.0
