@@ -64,6 +64,6 @@ else
   echo "  still failing. Look at the actual kill reason:"
   echo "    log show --predicate 'eventMessage CONTAINS \"agentgateway\"' --last 5m --info | tail -30"
   echo "  and check the asset really matches $(uname -m):"
-  echo "    https://github.com/agentgateway/agentgateway/releases/tag/v1.5.0-beta.1"
+  echo "    https://github.com/agentgateway/agentgateway/releases/tag/v1.5.0"
 fi
 echo

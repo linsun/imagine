@@ -10,7 +10,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-VER="${1:-v1.5.0-beta.1}"
+VER="${1:-v1.5.0}"
 mkdir -p bin
 
 case "$(uname -s)" in
@@ -66,5 +66,5 @@ fi
 echo
 echo -n "  installed: "; ./bin/agentgateway --version 2>&1 | head -2
 echo
-echo "next:  make down && make up && make verify"
+echo "next:  ./imagine down && ./imagine up && ./imagine verify"
 echo "roll back:  ./scripts/install-gateway.sh v1.4.1"

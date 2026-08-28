@@ -11,11 +11,23 @@ echo
 grep -q "maxBufferSize" gateway/config.yaml && o "maxBufferSize raised (images need it)" || w "no maxBufferSize -- real photos will 502 at 2 MiB"
 grep -q "failureMode: failOpen" gateway/config.yaml && o "failureMode: failOpen" || w "failOpen MISSING -- one dead target kills every tool"
 if [ -x ./bin/agentgateway ]; then
-  v=$(./bin/agentgateway --version 2>&1 | head -1)
-  o "pinned gateway: $v"
+  # --version prints JSON across several lines; pull the value, not line 1.
+  v=$(./bin/agentgateway --version 2>&1 | sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' | head -1)
+  [ -n "$v" ] || v=$(./bin/agentgateway --version 2>&1 | head -1)
+  o "pinned gateway: $v   (./bin/agentgateway -- this is the one that runs)"
   case "$v" in *1.4.*) w "v1.4.x cannot parse bare Gemini :generateContent paths -- the double hop will 400. See README." ;; esac
+  case "$v" in *beta*|*rc*) w "that is a pre-release. ./scripts/install-gateway.sh pins the current default." ;; esac
+  # The one that bit us: upgrading the binary on PATH changes nothing here,
+  # because up.sh deliberately prefers the project-local pin.
+  if command -v agentgateway >/dev/null 2>&1; then
+    pv=$(agentgateway --version 2>&1 | sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' | head -1)
+    if [ -n "$pv" ] && [ "$pv" != "$v" ]; then
+      w "PATH has agentgateway $pv, but the demo runs the pinned $v."
+      w "  to use $pv: ./scripts/install-gateway.sh v$pv   (then down && up)"
+    fi
+  fi
 else
-  w "no pinned gateway in ./bin -- run: make gateway"
+  w "no pinned gateway in ./bin -- run: ./scripts/install-gateway.sh"
 fi
 [ -n "${GEMINI_API_KEY:-}" ] && o "GEMINI_API_KEY set" || w "GEMINI_API_KEY missing"
 [ -n "${OPENAI_API_KEY:-}" ] && o "OPENAI_API_KEY set (failover armed)" || w "no OPENAI_API_KEY -- Director has no fallback"

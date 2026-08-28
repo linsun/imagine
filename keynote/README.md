@@ -32,7 +32,7 @@ agentgateway demo does.
 brew install ...                       # nothing special; python3 + a webcam
 cd imagine                             # repo root, on the agntcon-japan branch
 ./imagine install
-./keynote/scripts/install-gateway.sh   # pins agentgateway >= v1.5.0-beta.1 into bin/
+./keynote/scripts/install-gateway.sh   # pins agentgateway >= v1.5.0 into bin/
 cp keynote/.env.example keynote/.env && $EDITOR keynote/.env   # GEMINI_API_KEY at minimum
 ```
 
