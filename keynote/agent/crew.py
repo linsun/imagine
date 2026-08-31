@@ -60,9 +60,11 @@ ROLES = {
 def build(role: str) -> FastAPI:
     prompt, port, title = ROLES[role]
     app = FastAPI()
-    # The gateway holds the provider credential. The SDK insists on a non-empty
-    # api_key, so send a placeholder -- never a real provider key.
-    client = OpenAI(base_url=f"{LLM}/v1", api_key="agentgateway", timeout=120)
+    # The gateway holds the provider credential. We send the VIRTUAL key --
+    # an identity the gateway budgets, never a real provider key.
+    client = OpenAI(base_url=f"{LLM}/v1",
+                    api_key=os.environ.get("AGW_VIRTUAL_KEY", "agentgateway"),
+                    timeout=120)
 
     card = {
         "name": title,

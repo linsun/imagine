@@ -123,6 +123,12 @@ LOCAL_TOOLS = [
                        "properties": {"scene": {"type": "string"}}}}},
 ]
 
+# The VIRTUAL key. Not a provider credential -- it identifies this agent to
+# agentgateway, which is what the $10/day budget is charged against. The real
+# Gemini and OpenAI keys still live only in the gateway. Falls back to the old
+# placeholder so the demo runs unchanged with no apiKey policy configured.
+VIRTUAL_KEY = os.environ.get("AGW_VIRTUAL_KEY", "agentgateway")
+
 SLOW = {"vision_generate_video": 90, "post_add_credits": 15,
         "vision_transform_image": 12, "publish_publish_video": 20}
 
@@ -246,10 +252,11 @@ class _Ticker:
 
 class Director:
     def __init__(self) -> None:
-        # The gateway holds the provider credential. The SDK requires a
-        # non-empty api_key, so send a placeholder. If this ever needs to be a
-        # real key, the demo's whole thesis has broken.
-        self.client = OpenAI(base_url=f"{LLM}/v1", api_key="agentgateway", timeout=300)
+        # The gateway holds the provider credential. What we send is the
+        # VIRTUAL key -- an identity the gateway budgets, not something that
+        # can talk to Gemini. If this ever has to be a real provider key, the
+        # demo's whole thesis has broken.
+        self.client = OpenAI(base_url=f"{LLM}/v1", api_key=VIRTUAL_KEY, timeout=300)
         self.messages = [{"role": "system", "content": SYSTEM}]
         self.tools: list[dict] = []
         # Kept verbatim so the Scout cannot quietly drop part of the request --

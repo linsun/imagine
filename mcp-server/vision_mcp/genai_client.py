@@ -29,25 +29,49 @@ _clients: dict[str, genai.Client] = {}
 
 
 def _api_key(base_url: str = "") -> str:
+    if base_url:
+        # Routed through agentgateway, which injects the real credential. Send
+        # a placeholder and NOTHING else -- the SDK only insists that it be
+        # non-empty.
+        #
+        # This check comes FIRST on purpose. It used to read the environment
+        # first and return the real key if one happened to be exported, which
+        # up.sh does for every child process. The call still worked, because
+        # the gateway forwarded the key we handed it -- so the double hop
+        # looked fine while quietly proving nothing.
+        return "agentgateway"
     key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     if key:
         return key
-    if base_url:
-        # The gateway injects the real credential. The SDK still insists on a
-        # non-empty key, so hand it a placeholder. This is the good case: it
-        # means this process genuinely has no model credential.
-        return "agentgateway"
     raise RuntimeError(
         "GEMINI_API_KEY (or GOOGLE_API_KEY) is not set, and no GEMINI_BASE_URL "
         "is configured to supply one. Get a key at https://aistudio.google.com/apikey"
     )
 
 
+def _virtual_key_headers() -> dict:
+    """Present the gateway's VIRTUAL key on the double hop.
+
+    The Gemini SDK authenticates with `x-goog-api-key`, which agentgateway's
+    apiKey policy does not read -- so without this, image generation sails
+    past the budget uncounted, and image tokens are the expensive ones. A
+    bearer header alongside it puts this leg on the same virtual identity the
+    agent uses, so one $10/day budget covers reasoning AND pictures.
+
+    Empty when AGW_VIRTUAL_KEY is unset: no policy configured, nothing to say.
+    """
+    key = os.environ.get("AGW_VIRTUAL_KEY", "")
+    return {"Authorization": f"Bearer {key}"} if key else {}
+
+
 def _build(base_url: str) -> genai.Client:
     if base_url:
         return genai.Client(
             api_key=_api_key(base_url),
-            http_options=types.HttpOptions(base_url=base_url),
+            http_options=types.HttpOptions(
+                base_url=base_url,
+                headers=_virtual_key_headers() or None,
+            ),
         )
     return genai.Client(api_key=_api_key())
 

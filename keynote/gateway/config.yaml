@@ -41,6 +41,7 @@ llm:
     provider: gemini
     params:
       model: gemini-2.5-flash-image
+      apiKey: $GEMINI_API_KEY
   - name: gemini-2.5-flash-image
     visibility: public
     provider: gemini
@@ -57,6 +58,27 @@ llm:
         - model: director-fallback
           priority: 1
   policies:
+    apiKey:
+      mode: strict
+      keys:
+      - keyHash: sha256:2a496f3cc41dbc19edf5213901c31f2aba2f68028fe28d991317a412ce10d616
+        metadata:
+          name: director
+        budgets:
+        - name: daily-spend
+          limit:
+            unit: USD
+            amount: 10
+          window:
+            rolling: 24h
+          onBudgetExceeded: Block
+        - name: tripwire
+          limit:
+            unit: Tokens
+            amount: 200000
+          window:
+            rolling: 24h
+          onBudgetExceeded: Block
     cors:
       allowOrigins:
       - http://localhost:15000

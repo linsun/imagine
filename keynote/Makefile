@@ -60,7 +60,9 @@ verify:
 	@bash scripts/verify.sh
 
 demo:
-	@set -a; . ./.env; set +a; $(PY) -m agent.director || true
+	@set -a; . ./.env; set +a; \
+	env -u GEMINI_API_KEY -u GOOGLE_API_KEY -u OPENAI_API_KEY \
+	  $(PY) -m agent.director || true
 
 preflight:
 	@bash scripts/preflight.sh

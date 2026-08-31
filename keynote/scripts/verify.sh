@@ -13,6 +13,10 @@ if [ ! -x "$PY" ]; then
 fi
 
 LLM="${AGW_LLM:-http://localhost:3000}"
+# The VIRTUAL key the agents present. With apiKey mode: strict the gateway
+# rejects anything without it, so these raw curls must carry it too.
+VK="${AGW_VIRTUAL_KEY:-agentgateway}"
+AUTH="Authorization: Bearer $VK"
 SCOUT="${SCOUT_A2A:-http://localhost:3002}"
 DP="${DP_A2A:-http://localhost:3003}"
 pass=0; fail=0
@@ -50,14 +54,14 @@ fi
 
 echo
 echo "1. agent -> LLM"
-r=$(curl -s -m 60 "$LLM/v1/chat/completions" -H 'content-type: application/json' \
+r=$(curl -s -m 60 "$LLM/v1/chat/completions" -H 'content-type: application/json' -H "$AUTH" \
   -d '{"model":"director","messages":[{"role":"user","content":"Reply with the single word: ready"}]}')
 if echo "$r" | grep -qi ready; then
   ok "virtualModel 'director' (Gemini, failing over to OpenAI)"
 else
   bad "virtualModel 'director'" "$(echo "$r" | head -c 250)"
   # Isolate: does a plain, non-virtual model work?
-  r2=$(curl -s -m 60 "$LLM/v1/chat/completions" -H 'content-type: application/json' \
+  r2=$(curl -s -m 60 "$LLM/v1/chat/completions" -H 'content-type: application/json' -H "$AUTH" \
     -d '{"model":"nano-banana","messages":[{"role":"user","content":"hi"}]}')
   if echo "$r2" | grep -q '"choices"'; then
     note "but concrete model 'nano-banana' WORKS -> the problem is the"
@@ -65,6 +69,66 @@ else
   else
     note "concrete model also fails -> credential is not reaching the provider."
   fi
+fi
+
+echo
+echo "1b. virtual key enforcement"
+if grep -q "^    apiKey:" gateway/config.yaml; then
+  code=$(curl -s -o /dev/null -w '%{http_code}' -m 30 "$LLM/v1/chat/completions" \
+    -H 'content-type: application/json' -H 'Authorization: Bearer sk-not-a-real-key' \
+    -d '{"model":"director","messages":[{"role":"user","content":"hi"}]}')
+  case "$code" in
+    401|403) ok "a wrong virtual key is rejected ($code)" ;;
+    200)     bad "a WRONG virtual key was accepted (200)" \
+                 "the apiKey policy is not enforcing -- check mode and keyHash" ;;
+    *)       bad "unexpected status for a wrong key: $code" ;;
+  esac
+  # An unkeyed request: rejected under strict, allowed (and unbudgeted) under
+  # optional. Either is legitimate -- this just tells you which you are running.
+  nokey=$(curl -s -o /dev/null -w '%{http_code}' -m 30 "$LLM/v1/chat/completions" \
+    -H 'content-type: application/json' \
+    -d '{"model":"director","messages":[{"role":"user","content":"hi"}]}')
+  case "$nokey" in
+    401|403) ok "an unkeyed request is rejected ($nokey) -- mode: strict" ;;
+    200)     ok "an unkeyed request is allowed (200) -- mode: optional, and it is NOT budgeted" ;;
+    *)       note "unkeyed request returned $nokey" ;;
+  esac
+else
+  note "no apiKey policy in gateway/config.yaml -- skipping"
+fi
+
+echo
+echo "1c. no agent holds a provider credential"
+# Reads the ENVIRONMENT OF THE LIVE PROCESSES (ps eww), not the source. This is
+# the demo's central claim, so check the running thing, not what we meant.
+if [ -d .pids ]; then
+  leak=0; checked=0
+  for f in .pids/scout .pids/dp .pids/viewfinder; do
+    [ -e "$f" ] || continue
+    name=$(basename "$f"); pid=$(cat "$f")
+    kill -0 "$pid" 2>/dev/null || continue
+    checked=$((checked+1))
+    envs=$(ps eww -p "$pid" 2>/dev/null | tr ' ' '\n' | grep -E "^(GEMINI_API_KEY|GOOGLE_API_KEY|OPENAI_API_KEY)=" || true)
+    if [ -n "$envs" ]; then
+      bad "$name has a provider key in its environment" "$(echo "$envs" | cut -d= -f1 | tr '\n' ' ')"
+      leak=1
+    fi
+  done
+  if [ "$checked" = 0 ]; then
+    note "no agent processes running -- start them with ./imagine up"
+  elif [ "$leak" = 0 ]; then
+    ok "$checked agent process(es): no GEMINI/GOOGLE/OPENAI key in the environment"
+  fi
+  # vision-mcp is allowed exactly one: Veo does not go through the gateway.
+  if [ -e .pids/vision-mcp ] && kill -0 "$(cat .pids/vision-mcp)" 2>/dev/null; then
+    if ps eww -p "$(cat .pids/vision-mcp)" 2>/dev/null | tr ' ' '\n' | grep -q "^GEMINI_BASE_URL="; then
+      ok "vision-mcp routes its image calls through the gateway (GEMINI_BASE_URL set)"
+    else
+      bad "vision-mcp has no GEMINI_BASE_URL" "the double hop is not happening; it is calling Google directly"
+    fi
+  fi
+else
+  note "no .pids directory -- nothing running"
 fi
 
 echo

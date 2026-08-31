@@ -27,8 +27,14 @@ MCP_PORT="${VISION_MCP_PORT:-8000}" \
   "import sys; sys.path.insert(0,'../mcp-server'); from vision_mcp.server import main; main()"
 
 start viewfinder "$PY" -m servers.viewfinder
-start scout "$PY" -m agent.crew scout
-start dp    "$PY" -m agent.crew dp
+
+# The AGENTS get no provider credentials. Not "they don't use them" -- they
+# are not in the process environment at all, so there is nothing to leak, log
+# or accidentally fall back to. They reach the models with AGW_VIRTUAL_KEY and
+# nothing else. `./imagine verify` checks this on the LIVE processes.
+NOKEYS="env -u GEMINI_API_KEY -u GOOGLE_API_KEY -u OPENAI_API_KEY -u GITHUB_TOKEN"
+start scout $NOKEYS "$PY" -m agent.crew scout
+start dp    $NOKEYS "$PY" -m agent.crew dp
 
 sleep 2
 # agentgateway last: it spawns the stdio MCP servers itself

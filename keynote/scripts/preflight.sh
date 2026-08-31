@@ -29,6 +29,37 @@ if [ -x ./bin/agentgateway ]; then
 else
   w "no pinned gateway in ./bin -- run: ./scripts/install-gateway.sh"
 fi
+# --- virtual key + budgets (1.5.0) ---------------------------------------
+# ^    apiKey: -- the POLICY at llm.policies, not the provider
+# credentials at llm.models[].params.apiKey, which are indented deeper.
+if grep -q "^    apiKey:" gateway/config.yaml; then
+  if [ -z "${AGW_VIRTUAL_KEY:-}" ]; then
+    w "config has an apiKey policy but AGW_VIRTUAL_KEY is unset -- the agents"
+    w "  will send the old 'agentgateway' placeholder, which is now an INVALID"
+    w "  key and gets rejected. Set it in .env."
+  else
+    want=$(grep -o "sha256:[0-9a-fA-F]\{64\}" gateway/config.yaml | head -1 | cut -d: -f2 | tr 'A-Z' 'a-z')
+    have=$(printf '%s' "$AGW_VIRTUAL_KEY" | { shasum -a 256 2>/dev/null || sha256sum; } | cut -d' ' -f1)
+    if [ -n "$want" ] && [ "$want" = "$have" ]; then
+      o "virtual key matches the keyHash in config.yaml"
+    else
+      w "AGW_VIRTUAL_KEY does NOT match the keyHash in gateway/config.yaml."
+      w "  fix:  printf '%s' \"\$AGW_VIRTUAL_KEY\" | shasum -a 256"
+    fi
+  fi
+  grep -q "unit: USD" gateway/config.yaml && o "USD budget configured" \
+    || w "apiKey policy present but no USD budget"
+  # A live tripwire is a demo prop, not something to walk on stage with by
+  # accident -- it blocks the NEXT call after it trips.
+  grep -qE "^ *- name: tripwire" gateway/config.yaml \
+    && w "the TRIPWIRE budget is UNCOMMENTED -- calls will 429 once it trips" \
+    || o "tripwire budget is commented out"
+  if grep -q "mode: strict" gateway/config.yaml; then
+    o "apiKey mode: strict -- nothing reaches the models without the virtual key"
+  else
+    w "apiKey mode is not strict -- unkeyed requests are allowed AND unbudgeted"
+  fi
+fi
 [ -n "${GEMINI_API_KEY:-}" ] && o "GEMINI_API_KEY set" || w "GEMINI_API_KEY missing"
 [ -n "${OPENAI_API_KEY:-}" ] && o "OPENAI_API_KEY set (failover armed)" || w "no OPENAI_API_KEY -- Director has no fallback"
 if [ -n "${GITHUB_TOKEN:-}" ]; then

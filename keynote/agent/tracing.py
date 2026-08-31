@@ -18,6 +18,7 @@ Degrades to a no-op if the OpenTelemetry packages are missing.
 
 import json
 import os
+import time
 from contextlib import contextmanager
 
 OTLP = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317")
@@ -87,12 +88,37 @@ def headers() -> dict:
 # this immediately before each call instead. Tool calls are awaited one at a
 # time, so a single slot is safe.
 _pending: dict = {}
+_pending_at: float = 0.0
+# How long a captured context stays usable. A tool call sends its POST within
+# milliseconds; anything later is a different event that happens to find the
+# slot still full.
+_PENDING_TTL = 30.0
 
 
 def set_pending(carrier: dict) -> None:
     """Record the trace context for the call about to be sent."""
+    global _pending_at
     _pending.clear()
     _pending.update(carrier or {})
+    _pending_at = time.monotonic()
+
+
+def _take_pending() -> dict:
+    """Consume the slot. Once, and only while it is fresh.
+
+    Both halves matter. The slot used to be read without clearing, so the MCP
+    transport's long-lived `GET /mcp` stream -- which reconnects on its own
+    schedule, minutes after any tool call -- picked up whatever context was
+    left in it. That is how a 15-minute idle SSE stream appeared in Jaeger as
+    a child of `tool:publish_publish_video`, a span that had finished twelve
+    minutes earlier.
+    """
+    if not _pending:
+        return {}
+    fresh = (time.monotonic() - _pending_at) <= _PENDING_TTL
+    carrier = dict(_pending)
+    _pending.clear()
+    return carrier if fresh else {}
 
 
 async def _mirror_mcp_trace_headers(request) -> None:
@@ -114,13 +140,23 @@ async def _mirror_mcp_trace_headers(request) -> None:
         value = meta.get(name)
         if isinstance(value, str):
             request.headers[name] = value
+    if "traceparent" in request.headers:
+        return
+
+    # The streamable-HTTP transport also opens a long-lived GET for the
+    # server->client stream, and sends a DELETE to close the session. Those are
+    # transport lifecycle, not part of any tool call: give them no parent, so
+    # they start their own trace instead of hanging a 15-minute idle span off
+    # whatever ran last.
+    if request.method != "POST":
+        return
+
     # Fallback order matters. `_pending` is the context captured in the CALLER's
     # task just before the call; the live context here belongs to the transport
     # task and is usually wrong. So prefer _meta, then _pending, then whatever
     # this task happens to hold.
-    if "traceparent" not in request.headers:
-        for k, v in (_pending or headers()).items():
-            request.headers[k] = v
+    for k, v in (_take_pending() or headers()).items():
+        request.headers[k] = v
 
 
 def mcp_httpx_factory():

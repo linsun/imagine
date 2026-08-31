@@ -16,9 +16,19 @@ No browser is required to run any of it.
 ## The one line the demo exists to prove
 
 ```
-$ env | grep -iE 'gemini|openai'      # on the agent host
+$ ps eww -p $(cat .pids/scout) | tr ' ' '\n' | grep -E 'GEMINI|OPENAI'
 $                                     # nothing
 ```
+
+Not "the agents don't use the keys" — the keys are **not in their process
+environment**. `up.sh` starts Scout and DP, and `./imagine demo` starts the
+Director, behind `env -u GEMINI_API_KEY -u GOOGLE_API_KEY -u OPENAI_API_KEY`,
+so there is nothing to leak, log, or quietly fall back to. `./imagine verify`
+step 1c asserts this against the **live processes**, not the source.
+
+One process is allowed one credential: `vision-mcp` keeps `GEMINI_API_KEY` for
+the Veo call, which does not go through the gateway (`VEO_BASE_URL` is unset).
+Its image calls do, and send only a placeholder.
 
 …and it still photographs the room, transforms it, makes the film, and publishes it.
 `GEMINI_API_KEY` lives in agentgateway. So does the failover to OpenAI. Even
@@ -71,6 +81,55 @@ Then just talk to it:
 you › take a photo of the room and make my audience do a Japanese dance
 ```
 
+## Virtual keys and budgets (agentgateway 1.5.0)
+
+The agents no longer send a placeholder string as their API key — they send
+`AGW_VIRTUAL_KEY`, a **virtual** key that exists only in agentgateway. It
+cannot talk to Gemini or OpenAI; it is an identity to charge. `gateway/config.yaml`
+stores only its SHA-256, so nothing secret is committed:
+
+```yaml
+llm:
+  policies:
+    apiKey:
+      mode: strict
+      keys:
+      - keyHash: sha256:<printf '%s' "$AGW_VIRTUAL_KEY" | shasum -a 256>
+        metadata: {name: director}   # `name` is required when a key has budgets
+        budgets:
+        - name: daily-spend
+          limit: {unit: USD, amount: 10}
+          window: {rolling: 24h}
+          onBudgetExceeded: Block
+```
+
+Three things make this work, and each was a real trap:
+
+- **`mode` is authentication, not budget.** `onBudgetExceeded: Block` is what
+  refuses an over-budget request, and it does that under *any* mode. `mode`
+  only decides what happens to a request carrying no key at all. We run
+  `strict`: no key, no service — so nothing can reach the models, or spend
+  money, uncounted. Veo is not affected: `VEO_BASE_URL` is unset, so
+  `:predictLongRunning` goes straight to Google and never touches this
+  listener.
+- **The double hop carries the key too.** The Gemini SDK authenticates with
+  `x-goog-api-key`, which the apiKey policy does not read — so `vision-mcp`
+  would have sailed past the budget uncounted, and image tokens are the
+  expensive ones (`gemini-2.5-flash-image` output is $30/1M in
+  `gateway/base-costs.json`). `genai_client.py` adds a bearer header alongside,
+  so one budget covers reasoning *and* pictures.
+- **No `$` in comments.** agentgateway shell-expands the whole config file
+  *before* parsing it, comments included, and an undefined variable is a hard
+  load error. A `$AGW_VIRTUAL_KEY` in a comment stopped the config reloading.
+- **USD budgets need `config.database` and `config.modelCatalog`.** Both were
+  already in this config, and the catalog has rates for all three models used
+  here. Note those live under the top-level `config:` block, which is the one
+  section that does *not* hot-reload.
+
+Everything under `llm.policies` does hot-reload, which is what makes the
+tripwire beat in [RUNBOOK.md](RUNBOOK.md) possible: trip a tiny token budget,
+raise it, carry on — no restart.
+
 ## What's here
 
 | | |
@@ -91,7 +150,7 @@ you › take a photo of the room and make my audience do a Japanese dance
 `../mcp-server` (your existing vision-mcp) is reused unchanged except for
 `genai_client.py`, which now honours `GEMINI_BASE_URL`.
 
-## Version requirement: agentgateway >= v1.5.0-beta.1
+## Version requirement: agentgateway >= v1.5.0
 
 **The double hop needs a build newer than v1.4.1.** This is a real gap, not a
 config mistake.

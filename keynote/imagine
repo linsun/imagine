@@ -140,6 +140,20 @@ def cmd_down(_args) -> int:
     return sh("down.sh")
 
 
+# Provider credentials the Director must never hold. The gateway holds them;
+# the agent reaches the models with AGW_VIRTUAL_KEY. Removed from the process
+# environment rather than merely unused, so there is nothing to leak or fall
+# back to. `./imagine verify` asserts this against the live process.
+PROVIDER_KEYS = ("GEMINI_API_KEY", "GOOGLE_API_KEY", "OPENAI_API_KEY")
+
+
+def agent_env() -> dict:
+    env = load_env()
+    for k in PROVIDER_KEYS:
+        env.pop(k, None)
+    return env
+
+
 def cmd_demo(_args) -> int:
     need_venv()
     if not any(n == "agentgateway" and ok for n, _, ok in running()):
@@ -147,7 +161,7 @@ def cmd_demo(_args) -> int:
               f"{BOLD}./imagine up{OFF} (or use {BOLD}./imagine start{OFF})\n")
     # -u so the step lines appear as they happen, not when the buffer flushes.
     return subprocess.call([VENV_PY, "-u", "-m", "agent.director"],
-                           cwd=HERE, env=load_env())
+                           cwd=HERE, env=agent_env())
 
 
 def cmd_start(args) -> int:

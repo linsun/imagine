@@ -177,3 +177,45 @@ The audience cannot tell a fallback from a plan unless you tell them.
 
 `outputs/` has everything. Delete the audience photos when you're done with
 them — you told the room you would.
+
+---
+
+## Optional beat — the budget that says no
+
+agentgateway 1.5.0 charges an LLM budget against a **virtual key**, not against
+a provider credential. The agents hold `AGW_VIRTUAL_KEY`; the config holds only
+its SHA-256. The real Gemini and OpenAI keys are still only in the gateway.
+
+Standing configuration: **$10 a day, then Block.** That is the real control and
+it should never fire on stage.
+
+The demo beat is a second, deliberately tiny budget. In `gateway/config.yaml`,
+uncomment the `tripwire` block under `llm.policies.apiKey`:
+
+```yaml
+        - name: tripwire
+          limit:
+            unit: Tokens
+            amount: 200
+          window:
+            rolling: 24h
+          onBudgetExceeded: Block
+```
+
+Save. **No restart** — everything under `llm.policies` hot-reloads. The next
+call comes back:
+
+```json
+{"error":{"message":"Budget exceeded","type":"rate_limit_error","code":"budget_exceeded"}}
+```
+
+with HTTP `429`. Raise `amount` to something large, save again, and the very
+next request goes through.
+
+Two things to know before you try it live:
+
+- **The budget is charged after the response.** The request that blows through
+  it still succeeds; the *next* one is refused. Burn it once off-stage so the
+  failure lands on the call you mean it to.
+- **Comment the tripwire back out before the real run.** `./imagine preflight`
+  warns you if you left it live.
