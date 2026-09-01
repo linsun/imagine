@@ -65,7 +65,7 @@ Or a step at a time:
 ```
 
 `./imagine` is a plain stdlib Python script that shells out to the same
-`scripts/*.sh`; `make` still works and does the identical thing.
+`scripts/*.sh`.
 
 **Why not Docker?** The three things this does on stage — open the MacBook
 camera, speak with `say`, and put a fullscreen window on the projector — are
@@ -337,7 +337,7 @@ whole path when there is no `/publishers/` segment, plus a test named
 
 **Two ways forward:**
 
-1. **Upgrade** to v1.5.0-beta.1, pin that exact binary, re-run `make verify`.
+1. **Upgrade** to v1.5.0-beta.1, pin that exact binary, re-run `./imagine verify`.
    You get the full first-class treatment: token counts, cost attribution,
    guardrails, model attribution.
 2. **Stay on v1.4.1** and uncomment the `image-gw` fallback at the bottom of
@@ -395,7 +395,7 @@ the gateway federates four servers. The prompt uses the prefixed names. Don't
 ## One week
 
 **Days 1–2 — does the spine work?**
-`make up && make verify`. Step 3 is the one that matters: if `vision-mcp` can't
+`./imagine up && ./imagine verify`. Step 3 is the one that matters: if `vision-mcp` can't
 reach Gemini *through* the gateway, the talk's thesis is wrong and you need to
 know on day one. Then camera permission, and one real PR merged end to end.
 
@@ -410,7 +410,7 @@ Kill Gemini mid-run and watch the failover. Unplug the camera. Turn off wifi and
 see what still works. Fix what you find.
 
 **Days 6–7 — rehearse.**
-`make preflight` each morning. **Record a complete backup of the demo working**
+`./imagine preflight` each morning. **Record a complete backup of the demo working**
 into `backup/demo-recording.mp4` and rehearse cutting to it. This is the highest
 value hour of the week.
 

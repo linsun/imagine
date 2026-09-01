@@ -189,6 +189,43 @@ def cmd_preflight(_args) -> int:
     return sh("preflight.sh")
 
 
+def cmd_models(_args) -> int:
+    """List the models the GEMINI (and OPENAI, if set) key can use.
+
+    A dev convenience, not part of the stage demo -- ported from the old
+    Makefile so `./imagine` stays a complete replacement for it.
+    """
+    env = load_env()
+    gkey = env.get("GEMINI_API_KEY", "")
+    if gkey:
+        print("GEMINI:")
+        try:
+            with urllib.request.urlopen(
+                    "https://generativelanguage.googleapis.com/v1beta/models?key="
+                    + gkey, timeout=15) as r:
+                for m in json.load(r).get("models", []):
+                    print("  ", m["name"].replace("models/", ""))
+        except (urllib.error.URLError, OSError, ValueError):
+            print("  (failed -- check GEMINI_API_KEY)")
+    else:
+        print("GEMINI: no key set")
+    okey = env.get("OPENAI_API_KEY", "")
+    if okey:
+        print("OPENAI:")
+        try:
+            req = urllib.request.Request(
+                "https://api.openai.com/v1/models",
+                headers={"Authorization": f"Bearer {okey}"})
+            with urllib.request.urlopen(req, timeout=15) as r:
+                for m in sorted(json.load(r).get("data", []), key=lambda x: x["id"]):
+                    print("  ", m["id"])
+        except (urllib.error.URLError, OSError, ValueError):
+            print("  (failed)")
+    else:
+        print("OPENAI: no key set")
+    return 0
+
+
 def cmd_jaeger(args) -> int:
     return sh("jaeger.sh", args.action)
 
@@ -423,6 +460,7 @@ def main() -> int:
     add("verify", cmd_verify, "smoke-test every leg through the gateway")
     add("preflight", cmd_preflight, "day-of checks")
     add("clean", cmd_clean, "remove outputs, data.db, .pids")
+    add("models", cmd_models, "list models your GEMINI/OPENAI key can use")
     add("login", cmd_login, "sign in to Keycloak (opens your browser)")
     add("logout", cmd_logout, "forget the cached token")
     s = add("auth", cmd_auth, "turn the gateway's MCP auth policy on/off")

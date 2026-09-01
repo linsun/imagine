@@ -145,5 +145,5 @@ say -v Samantha "Thank you for being part of the cast!"
 | | |
 | --- | --- |
 | `VIDEO_DURATION` | 4, 6 or 8 seconds. Shorter generates faster. |
-| `VIDEO_MODEL` | `make models` shows what your key can use |
+| `VIDEO_MODEL` | `./imagine models` shows what your key can use |
 | `IMAGE_MODEL` | the gateway's name for it, e.g. `nano-banana` |

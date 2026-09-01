@@ -19,8 +19,7 @@ Then leave it running. **Do not `./imagine down` between rehearsal and the
 talk** — bringing it up is the slowest part.
 
 (`./imagine` at the repo root is a shim onto `keynote/imagine`, so the folder
-name never has to appear on stage. `make` inside `keynote/` still works and
-runs exactly the same scripts, if that is in your fingers. `./imagine start`
+name never has to appear on stage. `./imagine start`
 does `up` and then drops you straight into the Director, which is the single
 command for the day.)
 
