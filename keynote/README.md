@@ -1,4 +1,4 @@
-# imagine — the MCPCon + AGNTCon Japan demo
+# Imagine — the AGNTCon + MCPCon Japan demo
 
 > **Branch layout.** This lives on `agntcon-japan`; `main` is still the imagine
 > web app, untouched. The demo's files sit in `keynote/` so the branch stays a
@@ -7,33 +7,10 @@
 > GitHub releases are repo-level, not branch-level, so the QR code and the
 > `agntcon-mcpcon-japan-2026` release tag are unaffected by any of this.
 
-One photo of the room → one still → one film with music → played out loud →
-published as a GitHub release. Every arrow crosses **agentgateway**.
+Transform the room into a movie and
+publish it as a GitHub release. Every connections goes through **agentgateway**. Use agentgateway 1.5 or newer.
 
-No browser is required to run any of it.
-
-## The one line the demo exists to prove
-
-```
-$ ps eww -p $(cat .pids/scout) | tr ' ' '\n' | grep -E 'GEMINI|OPENAI'
-$                                     # nothing
-```
-
-Not "the agents don't use the keys" — the keys are **not in their process
-environment**. `up.sh` starts Scout and DP, and `./imagine demo` starts the
-Director, behind `env -u GEMINI_API_KEY -u GOOGLE_API_KEY -u OPENAI_API_KEY`,
-so there is nothing to leak, log, or quietly fall back to. `./imagine verify`
-step 1c asserts this against the **live processes**, not the source.
-
-One process is allowed one credential: `vision-mcp` keeps `GEMINI_API_KEY` for
-the Veo call, which does not go through the gateway (`VEO_BASE_URL` is unset).
-Its image calls do, and send only a placeholder.
-
-…and it still photographs the room, transforms it, makes the film, and publishes it.
-`GEMINI_API_KEY` lives in agentgateway. So does the failover to OpenAI. Even
-`vision-mcp` — which calls Gemini itself — gets its credential from the gateway
-via `GEMINI_BASE_URL`. That's the **double hop**, and it's the thing no other
-agentgateway demo does.
+The agents don't use the keys, the credentials were injected via agentgateway. The MCP servers also don't use keys, except `vision-mcp` keeps `GEMINI_API_KEY` for the Veo call. The public MCP is gated via agentgateway auth using keycloak as the IDP.
 
 ## Setup
 
@@ -46,9 +23,6 @@ cp keynote/.env.example keynote/.env && $EDITOR keynote/.env   # GEMINI_API_KEY 
 ```
 
 ## Run
-
-**Running it live? See [RUNBOOK.md](RUNBOOK.md).**
-**Film not what you wanted? See [PROMPTS.md](PROMPTS.md).**
 
 ```bash
 ./imagine start     # everything up, then the Director. This is the one command.
@@ -66,13 +40,6 @@ Or a step at a time:
 
 `./imagine` is a plain stdlib Python script that shells out to the same
 `scripts/*.sh`.
-
-**Why not Docker?** The three things this does on stage — open the MacBook
-camera, speak with `say`, and put a fullscreen window on the projector — are
-host-native on macOS and none of them survive containerisation. The backing
-services (gateway, Jaeger, vision-mcp) could be containerised; the camera and
-the projector cannot, so the demo would still need a host process and you would
-be debugging two runtimes instead of one on the morning of a keynote.
 
 Then just talk to it:
 
@@ -101,33 +68,6 @@ llm:
           window: {rolling: 24h}
           onBudgetExceeded: Block
 ```
-
-Three things make this work, and each was a real trap:
-
-- **`mode` is authentication, not budget.** `onBudgetExceeded: Block` is what
-  refuses an over-budget request, and it does that under *any* mode. `mode`
-  only decides what happens to a request carrying no key at all. We run
-  `strict`: no key, no service — so nothing can reach the models, or spend
-  money, uncounted. Veo is not affected: `VEO_BASE_URL` is unset, so
-  `:predictLongRunning` goes straight to Google and never touches this
-  listener.
-- **The double hop carries the key too.** The Gemini SDK authenticates with
-  `x-goog-api-key`, which the apiKey policy does not read — so `vision-mcp`
-  would have sailed past the budget uncounted, and image tokens are the
-  expensive ones (`gemini-2.5-flash-image` output is $30/1M in
-  `gateway/base-costs.json`). `genai_client.py` adds a bearer header alongside,
-  so one budget covers reasoning *and* pictures.
-- **No `$` in comments.** agentgateway shell-expands the whole config file
-  *before* parsing it, comments included, and an undefined variable is a hard
-  load error. A `$AGW_VIRTUAL_KEY` in a comment stopped the config reloading.
-- **USD budgets need `config.database` and `config.modelCatalog`.** Both were
-  already in this config, and the catalog has rates for all three models used
-  here. Note those live under the top-level `config:` block, which is the one
-  section that does *not* hot-reload.
-
-Everything under `llm.policies` does hot-reload, which is what makes the
-tripwire beat in [RUNBOOK.md](RUNBOOK.md) possible: trip a tiny token budget,
-raise it, carry on — no restart.
 
 ## GitHub through the gateway
 
@@ -166,19 +106,6 @@ your API calls to the upload host.
 `backendAuth`'s default location is `Authorization: Bearer <value>`, which is
 exactly what GitHub wants, and it *overwrites* whatever the caller sent.
 
-Three things this needed, each of which would have quietly broken it:
-
-- **The upload_url has to be rewritten.** GitHub hands back an absolute
-  `upload_url` on `uploads.github.com`. Following it verbatim would leave the
-  gateway — and the credential — behind, so `publish_mcp` keeps only its path
-  and re-anchors it on `GITHUB_UPLOADS`.
-- **`backendTLS: {}`.** Backends are plain HTTP by default; without this the
-  upstream hop is HTTP and GitHub answers a redirect.
-- **`clear_env: true` on the stdio target.** agentgateway *spawns* the stdio
-  MCP servers, so they inherit its environment — including `GITHUB_TOKEN`.
-  `clear_env` wipes it and `env:` lists back only what publishing needs, so
-  there is genuinely no credential in that process. (This one field is
-  snake_case; everything else in the file is camelCase.)
 
 ### Both sides of the hop
 
@@ -199,23 +126,6 @@ replaces that header with the GitHub token:
       backendAuth:             # what you may borrow
         key: {value: $GITHUB_TOKEN}
 ```
-
-Two different credentials travelling in the same header, and neither side ever
-holds the other's. Without the inbound guard, anything on the laptop that could
-reach :3004 could act as you on GitHub — the gateway would have handed it the
-token.
-
-Proof, not assertion — run from a page on `localhost:3004`:
-
-```js
-await fetch('/api/user')                                            // 401
-await fetch('/api/user', {headers:{authorization:'Bearer wrong'}})  // 401
-await fetch('/api/user', {headers:{authorization:'Bearer '+key}})   // 200 -> "linsun"
-```
-
-`verify` step 3b does the same through the real path: it fails if the publish
-server has a GitHub token in its environment, if it has no virtual key to get
-past the guard, or if the gateway did not authenticate to GitHub.
 
 ## Publishing needs a person (Keycloak + MCP auth)
 
@@ -243,39 +153,12 @@ and not a bare JWKS URL: agentgateway derives Keycloak's non-standard JWKS path,
 serves protected-resource metadata, and returns `401` + `WWW-Authenticate` so a
 standard MCP client can discover where to log in.
 
-**The UX is the point.** No command to remember. You describe the film; the
-pipeline runs; the film plays; then the Director *asks* whether to publish, and
-only if you say yes does it open the browser to sign you in — so signing in is
-a deliberate choice, and publish is never attempted without a token:
-
-```
-🎞️  rolling the credits
-▶️  the film
-
-  Publish this film to GitHub?  you'll sign in with Keycloak  [y/N] › y
-🔑  opening your browser to sign in
-   ✓ signed in as linsun
-☁️  published
-director › You can download the film at https://github.com/linsun/imagine/releases/tag/agntcon-mcpcon-japan-2026
-```
-
-Three things make that work:
-
-- **The unauthenticated agent cannot even see publish.** When no one is signed
-  in, `mcpAuthorization` filters the publish tools out of the tool listing
-  entirely. Publishing is code-driven (`_offer_publish` in `director.py`): it
-  asks, signs the person in, reconnects, and only THEN calls publish — so the
-  call is always made on an authenticated session.
-- **Reconnect after login.** `mcpAuthentication` binds identity at connect time,
-  so a session opened without a token is dropped and reopened once the token
-  exists (`tools.reset()`). The token is attached per request, so nothing else
-  restarts.
-- **Two layers, cleanly separated.** The person's Keycloak identity authorizes
+The person's Keycloak identity authorizes
   the publish *tool call* at the MCP listener; the gateway then injects the
   *GitHub* credential outbound via `backendAuth`. The person never holds the
   GitHub token; the GitHub token never carries the person's identity.
 
-**Operational.** The gateway fetches the JWKS while *parsing* its config, so
+The gateway fetches the JWKS while *parsing* its config, so
 Keycloak must be up before the gateway starts — otherwise the whole config is
 rejected (the running gateway keeps its old config; it does not die). `up.sh`
 and `preflight` check this, and `./imagine auth off` drops the policy in one
@@ -284,7 +167,7 @@ command if Keycloak is unavailable. Start Keycloak with your seed realm:
 ```bash
 docker run -d --name keycloak -p 8080:8080 \
   -e KC_BOOTSTRAP_ADMIN_USERNAME=admin -e KC_BOOTSTRAP_ADMIN_PASSWORD=admin \
-  -v ~/mcp-auth-demo/auth-server/keycloak-seed2:/opt/keycloak/data/import:ro \
+  -v keycloak:/opt/keycloak/data/import:ro \
   quay.io/keycloak/keycloak:26.4.1 start-dev --import-realm
 ```
 
@@ -311,120 +194,3 @@ demo path needs none of them.
 `../mcp-server` (your existing vision-mcp) is reused unchanged except for
 `genai_client.py`, which now honours `GEMINI_BASE_URL`.
 
-## Version requirement: agentgateway >= v1.5.0
-
-**The double hop needs a build newer than v1.4.1.** This is a real gap, not a
-config mistake.
-
-The google-genai SDK sends image requests to the bare Gemini API path:
-
-```
-POST /v1beta/models/gemini-2.5-flash-image:generateContent
-```
-
-v1.4.1's `extract_model_from_path` only understands **Vertex**-shaped paths
-(`/publishers/google/models/X:generateContent`) and Bedrock's (`/model/X`).
-A bare path falls through to body parsing — and Gemini request bodies have no
-`model` field — so you get:
-
-```
-400  LLM request body is missing string field 'model'   (code: missing_model)
-```
-
-Fixed on `main` and in **v1.5.0-beta.1**, which added the branch that keeps the
-whole path when there is no `/publishers/` segment, plus a test named
-`extract_model_from_path_handles_bare_gemini_api_paths`.
-
-**Two ways forward:**
-
-1. **Upgrade** to v1.5.0-beta.1, pin that exact binary, re-run `./imagine verify`.
-   You get the full first-class treatment: token counts, cost attribution,
-   guardrails, model attribution.
-2. **Stay on v1.4.1** and uncomment the `image-gw` fallback at the bottom of
-   `gateway/config.yaml`, then set `GEMINI_BASE_URL=http://localhost:3010`.
-   That is a plain HTTP route with `backendAuth` injecting the credential, so
-   vision-mcp *still* holds no API key — you keep the security story and the
-   access logs, but lose token/cost metering for the image call (it becomes the
-   same Passthrough tier Veo already sits in).
-
-Option 1 is better for the talk. Option 2 is the safe harbour if the beta
-misbehaves anywhere else — decide by day 3, not day 6.
-
-## Gotchas that cost real time
-
-**`frontendPolicies.http.maxBufferSize`** — agentgateway buffers the entire LLM
-response to parse it for token accounting, and the default cap is **2 MiB**.
-A real 1920x1080 photo coming back from Nano Banana exceeds that, giving
-`502 failed to process LLM response: response was too large`. The same limit
-applies to the request as a `413`. Set to 32 MiB, which is what agentgateway's
-own UI ships as its default. Streaming and `routeType: passthrough` are exempt,
-but you would lose token accounting.
-
-**Trailing slash on HTTP MCP targets** — FastMCP serves `/mcp`; `/mcp/` 307s and
-agentgateway does not follow redirects. It looks like the server is down.
-
-**Bare Gemini paths need >= v1.5.0-beta.1** — v1.4.1 only parses Vertex-shaped
-paths, so `/v1beta/models/X:generateContent` fails with `missing_model`.
-
-**Models are addressed by the name in `llm.models[]`**, not the provider's id.
-
-## Design decisions worth knowing
-
-**Handles, not bytes.** The model never sees an image or a video. Tools return
-`img_a1b2c3`; `agent/tools.py` swaps bytes in and out around each MCP call. This
-is why a 10 MB film never enters a prompt.
-
-**Publishing uses the GitHub REST API, not the GitHub MCP server.** That server
-*cannot* carry an MP4 — `create_or_update_file`'s `content` is a JSON string and
-the server base64-encodes it itself, so raw bytes can't survive. It's still an
-MCP tool, so the traffic is still governed by the gateway.
-
-**Release asset, not a commit.** A binary in git is effectively forever. A
-release asset is deletable — which matters when the file is a photo of a real
-audience.
-
-**Video is metered as MCP, not as LLM.** Veo's `:predictLongRunning` falls into
-agentgateway's Passthrough arm: no tokens, no cost, no dashboard row. Don't
-script a "watch the video cost appear" beat — you'd be pointing at an empty
-chart. It *is* metered one layer up, as a tool call.
-
-**Tool names are prefixed** (`camera_capture`, `vision_transform_image`) because
-the gateway federates four servers. The prompt uses the prefixed names. Don't
-"fix" this with `prefixMode: never` — duplicates get silently dropped.
-
-## One week
-
-**Days 1–2 — does the spine work?**
-`./imagine up && ./imagine verify`. Step 3 is the one that matters: if `vision-mcp` can't
-reach Gemini *through* the gateway, the talk's thesis is wrong and you need to
-know on day one. Then camera permission, and one real PR merged end to end.
-
-**Days 3–4 — the show.**
-Real audience photo. Tune the Scout and DP prompts (they're in `agent/crew.py`)
-— this is where the output quality actually comes from, and it's worth more of
-your time than any code here. Wire the QR to `gallery_url()`. Shoot fallback
-photos into `fallback/`.
-
-**Day 5 — break it on purpose.**
-Kill Gemini mid-run and watch the failover. Unplug the camera. Turn off wifi and
-see what still works. Fix what you find.
-
-**Days 6–7 — rehearse.**
-`./imagine preflight` each morning. **Record a complete backup of the demo working**
-into `backup/demo-recording.mp4` and rehearse cutting to it. This is the highest
-value hour of the week.
-
-### Cut order, if you run out of time
-The still-image step (go photo → video directly) · the DP agent (Director writes
-the shot) · the PR (show the film, point at a pre-published URL).
-**Never cut:** `failureMode: failOpen`, the offline rehearsal, the backup recording.
-
-## Still on you
-
-- **Consent**, announced before the camera opens. APPI treats facial images as
-  personal data and this ends up on a public URL.
-- **Which repo** — `GITHUB_REPO` defaults to a separate gallery repo on purpose.
-- **Check `main` for rulesets.** You cannot approve your own PR, so a
-  required-approval rule makes the live merge impossible.
-- **The QR** — generate it now from `gallery_url()`; that URL is predictable
-  before anything exists.
