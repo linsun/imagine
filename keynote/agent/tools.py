@@ -20,7 +20,7 @@ logging.getLogger("mcp.client.streamable_http").setLevel(logging.CRITICAL)
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
-from agent import store, tracing
+from agent import auth, store, tracing
 
 MCP_URL = os.environ.get("AGW_MCP", "http://localhost:3001/mcp")
 
@@ -54,7 +54,11 @@ class _Conn:
                         MCP_URL,
                         timeout=timedelta(seconds=30),
                         sse_read_timeout=timedelta(seconds=900),
-                        httpx_client_factory=tracing.mcp_httpx_factory(),
+                        httpx_client_factory=tracing.mcp_httpx_factory(
+                            # Attach the person's Keycloak token per request,
+                            # so a login mid-session is picked up on the next
+                            # call without restarting anything.
+                            extra_request_hooks=[auth.attach_bearer]),
                     )
                 )
                 sess = await stack.enter_async_context(ClientSession(r, w))
@@ -81,6 +85,17 @@ _conn = _Conn()
 async def close() -> None:
     await _conn.reset()
 
+
+async def reset() -> None:
+    """Drop the MCP session and reconnect on the next call.
+
+    Used after a browser login: mcpAuthentication binds identity at connect
+    time, so a session opened without a token must be reopened for the token
+    to take effect. Handles live in the Director's store, not the session, so
+    nothing is lost.
+    """
+    await _conn.reset()
+
 # Params that carry bytes. The model passes a handle; we substitute.
 _BYTES_IN = {"image_b64": "image", "video_b64": "video"}
 
@@ -95,6 +110,12 @@ HIDDEN = {
     # straight at it, so the PR added a step and a permission for nothing.
     # The tool still exists in publish_mcp if you want the beat back.
     "publish_open_pr",
+    # Publishing is code-driven: _publish() in director.py runs it AFTER the
+    # film is on screen, and wraps it in the browser-login-and-retry. The
+    # model never calls it. (The gateway also filters it from an
+    # unauthenticated tools/list, so it could not reliably see it anyway.)
+    "publish_publish_video",
+    "publish_check_auth",
     # Called from code the moment the preview URL comes back, so the model
     # never has to remember it -- and never gets to open anything else.
     "stage_open_url",

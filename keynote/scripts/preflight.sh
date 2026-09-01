@@ -29,6 +29,41 @@ if [ -x ./bin/agentgateway ]; then
 else
   w "no pinned gateway in ./bin -- run: ./scripts/install-gateway.sh"
 fi
+# --- MCP auth: publishing needs a person (Keycloak) ----------------------
+if grep -qE "^    mcpAuthentication:" gateway/config.yaml; then
+  iss=$(grep -m1 "^      issuer:" gateway/config.yaml | awk "{print \$2}")
+  if curl -sf -m 4 "$iss/.well-known/openid-configuration" >/dev/null 2>&1; then
+    o "MCP auth ON and Keycloak up ($iss)"
+  else
+    w "MCP auth is ON but Keycloak is DOWN -- the gateway will not load."
+    w "  start Keycloak, or ./imagine auth off"
+  fi
+  aud=$(grep -m1 "^      - publish" gateway/config.yaml | tr -d " -")
+  o "publish gated on a logged-in person (aud: ${aud:-publish-mcp-server})"
+else
+  o "MCP auth is off (publishing needs no login)"
+fi
+
+# --- GitHub via the gateway ----------------------------------------------
+if grep -q "host: api.github.com:443" gateway/config.yaml; then
+  o "GitHub routed through the gateway (backendAuth holds the token)"
+  grep -q "clear_env: true" gateway/config.yaml \
+    && o "publish MCP target runs with clear_env -- no GITHUB_TOKEN in it" \
+    || w "publish target has no clear_env -- it inherits GITHUB_TOKEN from the gateway"
+  if grep -c "keyHash" gateway/config.yaml | grep -qv "^1$"; then
+    o "GitHub routes are guarded by the virtual key (inbound), not open on :3004"
+  else
+    w ":3004 has NO inbound guard -- anything on this laptop can act as you on GitHub"
+  fi
+  if grep -q "host: uploads.github.com:443" gateway/config.yaml; then
+    o "uploads.github.com routed too (release assets go to a different host)"
+  else
+    w "no uploads.github.com route -- the release ASSET upload will not be authenticated"
+  fi
+else
+  w "publish talks to api.github.com directly and holds the token itself"
+fi
+
 # --- virtual key + budgets (1.5.0) ---------------------------------------
 # ^    apiKey: -- the POLICY at llm.policies, not the provider
 # credentials at llm.models[].params.apiKey, which are indented deeper.
@@ -51,9 +86,16 @@ if grep -q "^    apiKey:" gateway/config.yaml; then
     || w "apiKey policy present but no USD budget"
   # A live tripwire is a demo prop, not something to walk on stage with by
   # accident -- it blocks the NEXT call after it trips.
-  grep -qE "^ *- name: tripwire" gateway/config.yaml \
-    && w "the TRIPWIRE budget is UNCOMMENTED -- calls will 429 once it trips" \
-    || o "tripwire budget is commented out"
+  if grep -qE "^ *- name: tripwire" gateway/config.yaml; then
+    amt=$(grep -A3 "^ *- name: tripwire" gateway/config.yaml | grep -m1 "amount:" | awk '{print $2}')
+    if [ "${amt:-0}" -lt 10000 ] 2>/dev/null; then
+      w "TRIPWIRE budget is armed at ${amt} tokens -- it WILL block mid-demo"
+    else
+      o "tripwire budget present, set high (${amt} tokens) -- will not fire"
+    fi
+  else
+    o "tripwire budget is commented out"
+  fi
   if grep -q "mode: strict" gateway/config.yaml; then
     o "apiKey mode: strict -- nothing reaches the models without the virtual key"
   else
@@ -78,7 +120,9 @@ say -v '?' 2>/dev/null | grep -qi "en_" && o "English voice available" || w "no 
 say -v '?' 2>/dev/null | grep -qi "ja_JP" && o "Japanese voice available" || w "no Japanese voice (optional)"
 curl -sf "http://localhost:${PREVIEW_PORT:-8888}/healthz" | grep -q '"has_frame": *true' && o "viewfinder live with a frame" || w "viewfinder not ready -- logs/viewfinder.log"
 command -v ffmpeg >/dev/null && o "ffmpeg present (credits)" || w "no ffmpeg -- credits will fail. brew install ffmpeg"
-n=$(grep -vcE "^[[:space:]]*(#|$)" cast.txt 2>/dev/null || echo 0); [ "$n" -gt 0 ] && o "cast.txt has $n names" || w "cast.txt empty -- no credits"
+CAST="${CAST_FILE:-./cast}"    # the file is `cast`, with no extension
+n=$(grep -vcE "^[[:space:]]*(#|$)" "$CAST" 2>/dev/null || echo 0)
+[ "$n" -gt 0 ] && o "$CAST has $n names" || w "$CAST missing or empty -- no credits"
 ls fallback/*.jpg fallback/*.png >/dev/null 2>&1 && o "fallback photos present" || w "no fallback photos in ./fallback -- camera failure = dead demo"
 [ -f backup/demo-recording.mp4 ] && o "backup recording present" || w "NO BACKUP RECORDING. Record one."
 if [ -n "${GITHUB_REPO:-}" ] && [ -n "${GITHUB_TOKEN:-}" ]; then

@@ -3,7 +3,7 @@
 logs/
 outputs/
 data.db
-bin/agentgateway
+bin/agentgateway*
 .env
 
 # --- never commit these -------------------------------------------------
@@ -17,3 +17,5 @@ __pycache__/
 data.db-shm
 data.db-wal
 _to_delete/
+# cached Keycloak access token -- never commit a bearer token
+.token.json

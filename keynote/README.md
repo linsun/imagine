@@ -8,8 +8,7 @@
 > `agntcon-mcpcon-japan-2026` release tag are unaffected by any of this.
 
 One photo of the room → one still → one film with music → played out loud →
-published as a GitHub release, with a QR code on the last frame. Every arrow
-crosses **agentgateway**.
+published as a GitHub release. Every arrow crosses **agentgateway**.
 
 No browser is required to run any of it.
 
@@ -129,6 +128,168 @@ Three things make this work, and each was a real trap:
 Everything under `llm.policies` does hot-reload, which is what makes the
 tripwire beat in [RUNBOOK.md](RUNBOOK.md) possible: trip a tiny token budget,
 raise it, carry on — no restart.
+
+## GitHub through the gateway
+
+The publish MCP server used to read `GITHUB_TOKEN` and call `api.github.com`
+itself. It no longer holds a credential at all — the same move already made for
+Gemini, applied to the third provider.
+
+```yaml
+gateways:
+  github-gw:
+    port: 3004
+routes:
+- name: github-api
+  gateways: [github-gw]
+  matches:
+  - path: {pathPrefix: /api}
+  policies:
+    urlRewrite:
+      path: {prefix: /}            # /api/user -> api.github.com/user
+  backends:
+  - host: api.github.com:443
+    policies:
+      backendAuth:
+        key:
+          value: $GITHUB_TOKEN     # the gateway's copy, not the server's
+      backendTLS: {}
+- name: github-uploads             # same shape, /uploads -> uploads.github.com
+```
+
+**One port, two routes.** Release assets go to `uploads.github.com` and
+everything else to `api.github.com` — two different services, so they are two
+*routes* selected by path prefix. Not two hosts on one backend, and not two
+backends on one route: both of those mean load balancing, which would send half
+your API calls to the upload host.
+
+`backendAuth`'s default location is `Authorization: Bearer <value>`, which is
+exactly what GitHub wants, and it *overwrites* whatever the caller sent.
+
+Three things this needed, each of which would have quietly broken it:
+
+- **The upload_url has to be rewritten.** GitHub hands back an absolute
+  `upload_url` on `uploads.github.com`. Following it verbatim would leave the
+  gateway — and the credential — behind, so `publish_mcp` keeps only its path
+  and re-anchors it on `GITHUB_UPLOADS`.
+- **`backendTLS: {}`.** Backends are plain HTTP by default; without this the
+  upstream hop is HTTP and GitHub answers a redirect.
+- **`clear_env: true` on the stdio target.** agentgateway *spawns* the stdio
+  MCP servers, so they inherit its environment — including `GITHUB_TOKEN`.
+  `clear_env` wipes it and `env:` lists back only what publishing needs, so
+  there is genuinely no credential in that process. (This one field is
+  snake_case; everything else in the file is camelCase.)
+
+### Both sides of the hop
+
+The route is guarded going in as well as going out. Inbound it requires the
+same virtual key the agents use on the LLM listener; outbound `backendAuth`
+replaces that header with the GitHub token:
+
+```yaml
+  policies:
+    apiKey:                    # who are you
+      mode: strict
+      keys:
+      - keyHash: sha256:...
+        metadata: {name: publish}
+  backends:
+  - host: api.github.com:443
+    policies:
+      backendAuth:             # what you may borrow
+        key: {value: $GITHUB_TOKEN}
+```
+
+Two different credentials travelling in the same header, and neither side ever
+holds the other's. Without the inbound guard, anything on the laptop that could
+reach :3004 could act as you on GitHub — the gateway would have handed it the
+token.
+
+Proof, not assertion — run from a page on `localhost:3004`:
+
+```js
+await fetch('/api/user')                                            // 401
+await fetch('/api/user', {headers:{authorization:'Bearer wrong'}})  // 401
+await fetch('/api/user', {headers:{authorization:'Bearer '+key}})   // 200 -> "linsun"
+```
+
+`verify` step 3b does the same through the real path: it fails if the publish
+server has a GitHub token in its environment, if it has no virtual key to get
+past the guard, or if the gateway did not authenticate to GitHub.
+
+## Publishing needs a person (Keycloak + MCP auth)
+
+Publishing is the one action in the show that touches the real world, so the
+gateway refuses it unless a person has signed in. This is agentgateway's MCP
+auth feature — `mcpAuthentication` + `mcpAuthorization` on the MCP listener,
+validating a real Keycloak JWT — not the apiKey policy.
+
+```yaml
+mcp:
+  policies:
+    mcpAuthentication:
+      mode: optional
+      issuer: http://localhost:8080/realms/my-realm
+      audiences: [publish-mcp-server]
+      provider: {keycloak: {}}       # first-class: derives JWKS, serves metadata
+    mcpAuthorization:
+      rules:
+      - deny: 'mcp.tool.target == "publish" && !has(jwt.sub)'
+```
+
+`mode: optional` so the four other targets stay open — the authorization rule
+is what refuses publish, and only publish. `provider: keycloak` is why Keycloak
+and not a bare JWKS URL: agentgateway derives Keycloak's non-standard JWKS path,
+serves protected-resource metadata, and returns `401` + `WWW-Authenticate` so a
+standard MCP client can discover where to log in.
+
+**The UX is the point.** No command to remember. You describe the film; the
+pipeline runs; the film plays; then the Director *asks* whether to publish, and
+only if you say yes does it open the browser to sign you in — so signing in is
+a deliberate choice, and publish is never attempted without a token:
+
+```
+🎞️  rolling the credits
+▶️  the film
+
+  Publish this film to GitHub?  you'll sign in with Keycloak  [y/N] › y
+🔑  opening your browser to sign in
+   ✓ signed in as linsun
+☁️  published
+director › You can download the film at https://github.com/linsun/imagine/releases/tag/agntcon-mcpcon-japan-2026
+```
+
+Three things make that work:
+
+- **The unauthenticated agent cannot even see publish.** When no one is signed
+  in, `mcpAuthorization` filters the publish tools out of the tool listing
+  entirely. Publishing is code-driven (`_offer_publish` in `director.py`): it
+  asks, signs the person in, reconnects, and only THEN calls publish — so the
+  call is always made on an authenticated session.
+- **Reconnect after login.** `mcpAuthentication` binds identity at connect time,
+  so a session opened without a token is dropped and reopened once the token
+  exists (`tools.reset()`). The token is attached per request, so nothing else
+  restarts.
+- **Two layers, cleanly separated.** The person's Keycloak identity authorizes
+  the publish *tool call* at the MCP listener; the gateway then injects the
+  *GitHub* credential outbound via `backendAuth`. The person never holds the
+  GitHub token; the GitHub token never carries the person's identity.
+
+**Operational.** The gateway fetches the JWKS while *parsing* its config, so
+Keycloak must be up before the gateway starts — otherwise the whole config is
+rejected (the running gateway keeps its old config; it does not die). `up.sh`
+and `preflight` check this, and `./imagine auth off` drops the policy in one
+command if Keycloak is unavailable. Start Keycloak with your seed realm:
+
+```bash
+docker run -d --name keycloak -p 8080:8080 \
+  -e KC_BOOTSTRAP_ADMIN_USERNAME=admin -e KC_BOOTSTRAP_ADMIN_PASSWORD=admin \
+  -v ~/mcp-auth-demo/auth-server/keycloak-seed2:/opt/keycloak/data/import:ro \
+  quay.io/keycloak/keycloak:26.4.1 start-dev --import-realm
+```
+
+`./imagine login` / `logout` / `auth status` exist as manual controls, but the
+demo path needs none of them.
 
 ## What's here
 

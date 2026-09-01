@@ -1,5 +1,4 @@
 fastmcp==2.11.3
-opencv-python==4.10.0.84
 pillow==11.3.0
 requests==2.32.3
 qrcode==8.0

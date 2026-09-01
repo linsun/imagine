@@ -22,6 +22,7 @@ containerised later; the camera and the projector cannot.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shutil
 import subprocess
@@ -205,6 +206,125 @@ def cmd_camera(args) -> int:
         return 1
 
 
+# --- MCP auth (Keycloak) ---------------------------------------------------
+
+AUTH_ON, AUTH_OFF = "    #AUTH ", "    "
+CONFIG = os.path.join(HERE, "gateway", "config.yaml")
+
+
+def _auth_span(text: str):
+    lines = text.split("\n")
+    try:
+        a = next(i for i, l in enumerate(lines) if ">>> mcp-auth" in l)
+        b = next(i for i, l in enumerate(lines) if "<<< mcp-auth" in l)
+    except StopIteration:
+        return lines, None, None
+    return lines, a, b
+
+
+def auth_is_on() -> bool | None:
+    with open(CONFIG, encoding="utf-8") as f:
+        lines, a, b = _auth_span(f.read())
+    if a is None:
+        return None
+    body = lines[a + 1:b]
+    return bool(body) and not any(l.startswith(AUTH_ON) for l in body)
+
+
+def keycloak_up() -> bool:
+    iss = os.environ.get("KEYCLOAK_ISSUER")
+    if not iss:
+        with open(CONFIG, encoding="utf-8") as f:
+            for line in f:
+                if "issuer:" in line and "realms" in line:
+                    iss = line.split("issuer:", 1)[1].strip()
+                    break
+    return bool(iss) and alive(f"{iss}/.well-known/openid-configuration", timeout=3)
+
+
+def cmd_login(_args) -> int:
+    sys.path.insert(0, HERE)
+    from agent import auth as a
+    out = a.login()
+    if not out.get("ok"):
+        die(out.get("error", "login failed"))
+    print(f"  {GRN}signed in as {out['user']}{OFF} "
+          f"{DIM}(valid {out['expires_in']}s, aud={out.get('aud')}){OFF}")
+    return 0
+
+
+def cmd_logout(_args) -> int:
+    sys.path.insert(0, HERE)
+    from agent import auth as a
+    print("signed out" if a.logout() else "was not signed in")
+    return 0
+
+
+def cmd_auth(args) -> int:
+    state = auth_is_on()
+    if state is None:
+        die("no mcp-auth block in gateway/config.yaml")
+
+    if args.action == "status":
+        print(f"\n  gateway policy : {GRN+'on'+OFF if state else DIM+'off'+OFF}")
+        print(f"  keycloak       : {GRN+'up'+OFF if keycloak_up() else DIM+'not reachable'+OFF}")
+        sys.path.insert(0, HERE)
+        from agent import auth as a
+        st = a.status()
+        if st.get("logged_in"):
+            print(f"  your token     : {GRN}{st['user']}{OFF} "
+                  f"{DIM}({st['seconds_left']}s left){OFF}\n")
+        else:
+            print(f"  your token     : {DIM}none — publishing will prompt you{OFF}\n")
+        return 0
+
+    want = args.action == "on"
+    if want == state:
+        print(f"already {args.action}")
+        return 0
+    if want and not keycloak_up():
+        die("Keycloak is not answering",
+            "the gateway loads the JWKS while parsing the config, so turning "
+            "auth on now would stop the WHOLE gateway loading. Start Keycloak "
+            "first.")
+    with open(CONFIG, encoding="utf-8") as f:
+        text = f.read()
+    lines, a, b = _auth_span(text)
+    for i in range(a + 1, b):
+        if want and lines[i].startswith(AUTH_ON):
+            lines[i] = AUTH_OFF + lines[i][len(AUTH_ON):]
+        elif not want and lines[i].strip() and not lines[i].startswith(AUTH_ON):
+            lines[i] = AUTH_ON + lines[i][len(AUTH_OFF):]
+    with open(CONFIG, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+    print(f"mcp auth {args.action}. "
+          f"{DIM}the gateway hot-reloads — ./imagine logs agentgateway{OFF}")
+    return 0
+
+
+def cmd_cameras(_args) -> int:
+    """Camera selection now lives in the browser preview.
+
+    The camera is owned by the browser (getUserMedia), which is what makes
+    Continuity Camera / the iPhone work reliably. So the picker is the dropdown
+    on the preview page, not a terminal list.
+    """
+    env = load_env()
+    port = env.get("PREVIEW_PORT", "8888")
+    print(f"\n  Camera selection is in the {BOLD}browser preview{OFF} now.")
+    print(f"  Say {BOLD}launch the camera{OFF} (or open http://localhost:{port}/),")
+    print(f"  allow camera access, and pick from the {BOLD}Camera{OFF} dropdown at the")
+    print(f"  top -- your iPhone appears there by name once Continuity Camera is on.")
+    try:
+        with urllib.request.urlopen(f"http://localhost:{port}/healthz", timeout=3) as r:
+            d = json.loads(r.read().decode())
+        state = "streaming" if d.get("streaming") else ("released" if d.get("paused") else "waiting for the browser")
+        print(f"\n  {DIM}viewfinder on :{port} -- {state}{OFF}\n")
+    except (urllib.error.URLError, OSError, ValueError):
+        print(f"\n  {DIM}viewfinder not running -- ./imagine up{OFF}\n")
+    return 0
+
+
 def cmd_status(_args) -> int:
     env = load_env()
     port = env.get("PREVIEW_PORT", "8888")
@@ -303,7 +423,13 @@ def main() -> int:
     add("verify", cmd_verify, "smoke-test every leg through the gateway")
     add("preflight", cmd_preflight, "day-of checks")
     add("clean", cmd_clean, "remove outputs, data.db, .pids")
+    add("login", cmd_login, "sign in to Keycloak (opens your browser)")
+    add("logout", cmd_logout, "forget the cached token")
+    s = add("auth", cmd_auth, "turn the gateway's MCP auth policy on/off")
+    s.add_argument("action", nargs="?", default="status",
+                   choices=["on", "off", "status"])
 
+    add("cameras", cmd_cameras, "list camera indices (find your phone/iPhone)")
     s = add("camera", cmd_camera, "release or re-take the camera")
     s.add_argument("action", choices=["on", "off"])
 

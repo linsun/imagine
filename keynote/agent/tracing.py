@@ -159,14 +159,21 @@ async def _mirror_mcp_trace_headers(request) -> None:
         request.headers[k] = v
 
 
-def mcp_httpx_factory():
-    """httpx client factory for streamablehttp_client, with the mirror hook."""
+def mcp_httpx_factory(extra_request_hooks=()):
+    """httpx client factory for streamablehttp_client, with the mirror hook.
+
+    extra_request_hooks run after the trace mirror on every request -- this is
+    how the Keycloak bearer token is attached per REQUEST, so a login mid-demo
+    takes effect on the next call rather than needing a restart.
+    """
     import httpx
+
+    hooks = [_mirror_mcp_trace_headers, *extra_request_hooks]
 
     def factory(headers=None, timeout=None, auth=None):
         return httpx.AsyncClient(
             headers=headers, timeout=timeout, auth=auth, follow_redirects=True,
-            event_hooks={"request": [_mirror_mcp_trace_headers]},
+            event_hooks={"request": hooks},
         )
 
     return factory

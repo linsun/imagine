@@ -145,15 +145,16 @@ async def go():
     names = sorted(x["function"]["name"] for x in t)
     print(f"  \033[32mPASS\033[0m tools/list returned {len(names)}")
     print("       " + ", ".join(names))
-    want = {"camera": "camera_", "vision": "vision_", "stage": "stage_", "publish": "publish_"}
-    miss = [k for k, p in want.items() if not any(n.startswith(p) for n in names)]
+    # publish is deliberately absent here: it is hidden from the model (code-
+    # driven + gated on a login), so step 3b exercises it, not this list.
+    want = {"camera": "camera_", "vision": "vision_", "stage": "stage_", "post": "post_"}
+    miss = [k for k, pfx in want.items() if not any(n.startswith(pfx) for n in names)]
     if miss:
         print(f"  \033[33mWARN\033[0m no tools from: {', '.join(miss)}")
         print("       failOpen means the gateway starts anyway -- grep logs/agentgateway.log")
-        print("       for the dead target. A stdio target that can't find python is")
-        print("       the usual cause; up.sh prepends .venv/bin to PATH for exactly that.")
+        print("       for the dead target (usually a stdio target that can't find python).")
     return 0
-os._exit(asyncio.run(go()) or 0)
+os._exit(asyncio.new_event_loop().run_until_complete(go()) or 0)
 PY
 [ $? -eq 0 ] && pass=$((pass+1)) || fail=$((fail+1))
 
@@ -205,8 +206,60 @@ async def go():
         print(f"       {store.path_of(out['image_handle'])}")
         return 0
     print(f"  \033[31mFAIL\033[0m no image: {out}"); return 1
-os._exit(asyncio.run(go()) or 0)
+os._exit(asyncio.new_event_loop().run_until_complete(go()) or 0)
 PY
+[ $? -eq 0 ] && pass=$((pass+1)) || fail=$((fail+1))
+
+echo
+echo "3b. publish -> GitHub  (person authorizes; gateway holds the token)"
+"$PY" - <<'PYX'
+import asyncio, os, sys
+sys.path.insert(0, ".")
+from agent import auth, tools
+
+AUTH_ON = False
+try:
+    with open("gateway/config.yaml", encoding="utf-8") as f:
+        AUTH_ON = any(l.startswith("    mcpAuthentication:") for l in f)
+except OSError:
+    pass
+
+def _denied(exc):
+    m = str(exc).lower()
+    return any(x in m for x in ("unknown tool: publish", "unauthor", "forbidden",
+                                "401", "403", "jwt", "not allowed"))
+
+async def go():
+    signed_in = bool(auth.token())
+    try:
+        out = await tools.call("publish_check_auth", {})
+    except Exception as exc:
+        # No token + gate on -> the gateway filters publish, so the call comes
+        # back as an unknown tool. That is the gate WORKING.
+        if AUTH_ON and not signed_in and _denied(exc):
+            print("  \033[32mPASS\033[0m publish is gated: an unauthenticated "
+                  "agent cannot call it (sign in to exercise the GitHub hop)")
+            return 0
+        print(f"  \033[31mFAIL\033[0m publish_check_auth -- {exc}")
+        return 1
+    # It answered -> signed in, or auth off. Prove the GitHub hop is clean.
+    if not out.get("via_gateway"):
+        print("  \033[31mFAIL\033[0m publish is calling api.github.com directly")
+        return 1
+    if out.get("token_in_this_process"):
+        print("  \033[31mFAIL\033[0m the publish server still has GITHUB_TOKEN "
+              "in its environment -- check clear_env on the stdio target")
+        return 1
+    if not out.get("ok"):
+        print(f"  \033[31mFAIL\033[0m gateway did not authenticate to GitHub: "
+              f"{str(out)[:200]}")
+        return 1
+    who = "signed in" if signed_in else "auth off"
+    print(f"  \033[32mPASS\033[0m ({who}) publish holds NO GitHub token; the "
+          f"gateway authenticated as {out.get('user','?')} -> {out.get('repo')}")
+    return 0
+os._exit(asyncio.new_event_loop().run_until_complete(go()) or 0)
+PYX
 [ $? -eq 0 ] && pass=$((pass+1)) || fail=$((fail+1))
 
 echo
@@ -253,7 +306,7 @@ async def go():
         print(f"  \033[32mPASS\033[0m captured -> {out.get('image_handle')}")
     except Exception as e:
         print(f"  \033[33mWARN\033[0m camera -- {e}")
-asyncio.run(go())
+asyncio.new_event_loop().run_until_complete(go())
 os._exit(0)
 CAM
 pass=$((pass+1))
@@ -282,7 +335,7 @@ async def go():
     print(f"  \033[32mPASS\033[0m {out.get('names_count')} names rolled -> {out.get('video_handle')}")
     print(f"       open {store.path_of(out['video_handle'])}")
     return 0
-os._exit(asyncio.run(go()) or 0)
+os._exit(asyncio.new_event_loop().run_until_complete(go()) or 0)
 CREDITS
 [ $? -eq 0 ] && pass=$((pass+1)) || fail=$((fail+1))
 
@@ -292,7 +345,7 @@ echo "7. voice"
 import asyncio, os, sys
 sys.path.insert(0, ".")
 from agent import tools
-out = asyncio.run(tools.call("stage_announce", {"en": "Verification complete.", "ja": "確認が完了しました。"}))
+out = asyncio.new_event_loop().run_until_complete(tools.call("stage_announce", {"en": "Verification complete.", "ja": "確認が完了しました。"}))
 print(("  \033[32mPASS\033[0m " if out.get("ok") else "  \033[33mWARN\033[0m ") + f"announce: {out}")
 os._exit(0)
 PY

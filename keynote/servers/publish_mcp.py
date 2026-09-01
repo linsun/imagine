@@ -25,31 +25,72 @@ from fastmcp import FastMCP
 
 mcp = FastMCP("publish")
 
-API = "https://api.github.com"
-UPLOADS = "https://uploads.github.com"
+# Point these at agentgateway and this server stops holding a GitHub
+# credential: the gateway injects it with a backendAuth policy, exactly as it
+# already does for Gemini on the double hop. up.sh sets both.
+#
+#   GITHUB_API=http://localhost:3004      -> api.github.com
+#   GITHUB_UPLOADS=http://localhost:3005  -> uploads.github.com
+#
+# Two ports because release assets go to a DIFFERENT HOST than the rest of the
+# API, and the upload_url GitHub hands back points at that host -- it has to be
+# rewritten or the upload leaves the gateway behind and arrives with no token.
+API = os.environ.get("GITHUB_API", "https://api.github.com").rstrip("/")
+UPLOADS = os.environ.get("GITHUB_UPLOADS", "https://uploads.github.com").rstrip("/")
+# True when we are routed: the gateway owns the credential, so we must not send
+# one. Its backendAuth OVERWRITES the Authorization header anyway, but sending a
+# token we should not have is how a demo quietly stops proving anything.
+VIA_GATEWAY = bool(os.environ.get("GITHUB_API"))
+# The gateway's :3004 routes are guarded by the same virtual key the agents use
+# on the LLM listener, so this server has to prove WHO it is before the gateway
+# will lend it WHAT it needs. The two are different credentials travelling in
+# the same header: we send the virtual key, backendAuth replaces it with the
+# GitHub token on the way out. Neither side ever holds the other's.
+VIRTUAL_KEY = os.environ.get("AGW_VIRTUAL_KEY", "")
 REPO = os.environ.get("GITHUB_REPO", "")
 TAG = os.environ.get("GITHUB_RELEASE_TAG", "keynote-demo")
 PAGES_URL = os.environ.get("PAGES_URL", "")
 
 
 def _token() -> str:
-    # Strip quotes and whitespace: a token pasted into .env as "ghp_..." or with
-    # a trailing space is the single most common cause of a 401 here.
+    # Only reached when NOT routed through the gateway. Strip quotes and
+    # whitespace: a token pasted into .env as "ghp_..." or with a trailing space
+    # is the single most common cause of a 401 here.
     t = os.environ.get("GITHUB_TOKEN", "").strip().strip('"').strip("'")
     if not t:
         raise RuntimeError(
-            "GITHUB_TOKEN is not set in the process agentgateway spawned. "
-            "If you added it to .env after `make up`, restart: make down && make up."
+            "GITHUB_TOKEN is not set in the process agentgateway spawned, and "
+            "GITHUB_API is not pointing at the gateway either, so there is no "
+            "credential from any source. Restart: ./imagine down && ./imagine up."
         )
     return t
 
 
 def _headers() -> dict:
-    return {
-        "Authorization": f"Bearer {_token()}",
+    h = {
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
     }
+    if VIA_GATEWAY:
+        if VIRTUAL_KEY:
+            h["Authorization"] = f"Bearer {VIRTUAL_KEY}"
+    else:
+        h["Authorization"] = f"Bearer {_token()}"
+    return h
+
+
+def _upload_base(release: dict) -> str:
+    """Where to PUT the asset.
+
+    GitHub returns an absolute upload_url on uploads.github.com. Following it
+    verbatim would bypass the gateway -- and therefore the credential -- so
+    when we are routed we keep only its PATH and re-anchor it on UPLOADS.
+    """
+    url = (release.get("upload_url") or "").split("{")[0]
+    if not VIA_GATEWAY:
+        return url
+    from urllib.parse import urlparse
+    return UPLOADS + urlparse(url).path
 
 
 def _explain(r, what: str) -> None:
@@ -113,7 +154,7 @@ def publish_video(video_b64: str, name: str = "") -> dict:
     data = base64.b64decode(video_b64)
     asset = name or f"film-{int(time.time())}.mp4"
     release = _ensure_release()
-    upload = release["upload_url"].split("{")[0]
+    upload = _upload_base(release)
 
     # Remove a same-named asset if one exists -- uploads are not idempotent.
     for existing in release.get("assets", []):
@@ -202,12 +243,20 @@ def check_auth() -> dict:
     Run this before the talk. It separates "token is bad" (401) from "token is
     fine but cannot touch this repo" (403), which need completely different fixes.
     """
-    out: dict = {"repo": REPO, "tag": TAG}
-    try:
-        out["token_present"] = bool(_token())
-        out["token_len"] = len(_token())
-    except RuntimeError as exc:
-        return {**out, "ok": False, "problem": str(exc)}
+    out: dict = {"repo": REPO, "tag": TAG, "via_gateway": VIA_GATEWAY,
+                 "api": API}
+    if VIA_GATEWAY:
+        # There is deliberately no token in this process. The gateway stamps
+        # one on the way out, so a 200 below proves BOTH that the credential
+        # works and that this server never held it.
+        out["token_in_this_process"] = bool(os.environ.get("GITHUB_TOKEN"))
+        out["sends_virtual_key"] = bool(VIRTUAL_KEY)
+    else:
+        try:
+            out["token_present"] = bool(_token())
+            out["token_len"] = len(_token())
+        except RuntimeError as exc:
+            return {**out, "ok": False, "problem": str(exc)}
 
     u = requests.get(f"{API}/user", headers=_headers(), timeout=20)
     if u.status_code == 401:

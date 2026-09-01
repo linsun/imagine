@@ -34,6 +34,11 @@ CREDITS_STYLE = os.environ.get("CREDITS_STYLE", "crawl").lower()
 # The one heading above the cast. Not a film title -- the Director used to
 # invent one ("The Audience") and it read as filler.
 CREDITS_TITLE = os.environ.get("CREDITS_TITLE", "AGNTCon + MCPCon Japan")
+# The closing card: the cast rolls first, then this line holds on screen at the
+# very end (the film's last frame, which ffplay parks on). ENDCARD_SECONDS=0
+# skips it.
+ENDCARD = os.environ.get("ENDCARD", CREDITS_TITLE)
+ENDCARD_SECONDS = float(os.environ.get("ENDCARD_SECONDS", "4"))
 # Music is OFF by default -- a drone under the credits is worse than silence.
 #   "none"/blank -> no music (just the spoken thank-you)
 #   a path       -> your own file  <-- do this for the real talk
@@ -316,10 +321,11 @@ def _card(width: int, height: int, title: str, subtitle: str,
           names: list[str], path: str) -> tuple[str, int]:
     """The tall card that scrolls past. Returns (path, columns).
 
-    `title`/`subtitle` from the caller are ignored: the heading is always
-    CREDITS_TITLE, so a model cannot put words on your screen.
+    `title`/`subtitle` from the caller are ignored: the crawl is the cast, and
+    the conference name is the held end card, so a model cannot put words on
+    your screen.
     """
-    title, subtitle = CREDITS_TITLE, ""
+    title, subtitle = "", ""
     cols = _layout(len(names))
     rows = math.ceil(len(names) / cols)
 
@@ -332,7 +338,7 @@ def _card(width: int, height: int, title: str, subtitle: str,
     # are moving from the first frame. Any gap here is dead starfield while the
     # thank-you plays -- 0.18 of a frame height cost 1.5 seconds of nothing.
     top_gap = int(height * 0.02)
-    head = int(title_size * 1.7) + (int(small * 2.6) if subtitle else 0) + int(small * 2.8)
+    head = (int(title_size * 1.7) if title else 0) + (int(small * 2.6) if subtitle else 0) + int(small * 2.8)
     # Barely any tail: the last name should clear the frame as the segment
     # ends, so the QR follows immediately instead of after seconds of stars.
     total = top_gap + head + rows * line_h + int(height * 0.06)
@@ -639,7 +645,8 @@ def add_credits(video_b64: str, title: str = "", subtitle: str = "",
 
     have_music = False
     choice = (CREDITS_MUSIC or "none").strip().lower()
-    total_audio = intro_dur + roll_dur + (QR_SECONDS if QR_SECONDS > 0 else 0)
+    total_audio = (intro_dur + roll_dur + (QR_SECONDS if QR_SECONDS > 0 else 0)
+                   + (ENDCARD_SECONDS if ENDCARD_SECONDS > 0 else 0))
     if choice in ("none", ""):
         pass
     elif choice == "film" and info["has_audio"]:
@@ -791,6 +798,36 @@ def add_credits(video_b64: str, title: str = "", subtitle: str = "",
             "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", withqr],
             check=True, capture_output=True)
         out = withqr
+
+    # ---- closing card: the conference name, held on the last frame ------
+    endcard_on = ENDCARD_SECONDS > 0 and bool(ENDCARD.strip())
+    if endcard_on:
+        end_png = os.path.join(tmp, "endcard.png")
+        end_seg = os.path.join(tmp, "endcard.mp4")
+        withend = os.path.join(tmp, "withend.mp4")
+        _title_card(w, h, ENDCARD, end_png, background=stars)  # same starfield + yellow
+        if have_music:
+            end_audio = ["-ss", str(intro_dur + roll_dur + (QR_SECONDS if qr_ok else 0)),
+                         "-t", str(ENDCARD_SECONDS), "-i", music]
+        else:
+            end_audio = ["-f", "lavfi", "-t", str(ENDCARD_SECONDS), "-i",
+                         "anullsrc=channel_layout=stereo:sample_rate=48000"]
+        subprocess.run([
+            ff, "-y", "-loop", "1", "-t", str(ENDCARD_SECONDS), "-i", end_png,
+            *end_audio,
+            "-vf", f"scale={w}:{h},setsar=1,fps={fps},format=yuv420p",
+            "-map", "0:v", "-map", "1:a",
+            "-c:v", "libx264", "-preset", "veryfast", "-c:a", "aac", "-b:a", "192k",
+            end_seg], check=True, capture_output=True)
+        subprocess.run([
+            ff, "-y", "-i", out, "-i", end_seg, "-filter_complex",
+            f"[0:v]scale={w}:{h},setsar=1,fps={fps}[a0];"
+            f"[1:v]scale={w}:{h},setsar=1,fps={fps}[a1];"
+            "[a0][0:a][a1][1:a]concat=n=2:v=1:a=1[v][a]",
+            "-map", "[v]", "-map", "[a]", "-c:v", "libx264", "-preset", "veryfast",
+            "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", withend],
+            check=True, capture_output=True)
+        out = withend
 
     with open(out, "rb") as f:
         data = f.read()

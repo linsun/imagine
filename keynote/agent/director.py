@@ -29,7 +29,7 @@ import time
 import httpx
 from openai import OpenAI
 
-from agent import store, tools, tracing
+from agent import auth, store, tools, tracing
 
 LLM = os.environ.get("AGW_LLM", "http://localhost:3000")
 A2A = {
@@ -68,6 +68,8 @@ do not retry it with different wording.
    camera_capture(countdown=3), or the number they asked for. The photo is
    shown on screen automatically -- do NOT call stage_show yourself. Say what
    you got in one sentence. Then STOP. Do not start the film.
+   If they don't like it and want ANOTHER photo, just call camera_capture
+   again -- the newest photo is the one that gets used. Do not restart anything.
    If the camera fails: camera_list_images() then camera_load_image().
    If the user asks to stop/turn off the camera: camera_release(). To pick it
    back up: camera_resume(). Neither ends anything -- do not treat them as the
@@ -87,16 +89,16 @@ do not retry it with different wording.
      e. post_add_credits(video_handle=<the film>)
         Pass NOTHING else. The heading, the cast and the closing QR are all
         fixed in config -- do not invent a title or retype any names.
-     f. publish_publish_video(video_handle=<the CREDITED film from step e>)
-        That is the last step. The release asset is public the moment it
-        uploads, and the QR in the film already points at it -- there is
-        nothing left to merge. Do NOT open a pull request.
 
-   The credited film plays out loud automatically after step e -- do NOT call
-   stage_show yourself.
+   That is your last tool call. After it, the credited film plays out loud and
+   you are asked whether to publish it -- do NOT call stage_show, and do NOT
+   call any publish tool yourself. Publishing needs a signed-in person and is
+   handled for you.
 
-   Then say, in one sentence, that the film is published and the QR at the end
-   of it is the download link.
+   Then say ONE short, warm sentence -- e.g. that the audience got their moment
+   as the cast. Do NOT say the film is "now playing" (it has already played),
+   do NOT claim it is published, and do NOT invent a download link. If it was
+   published, the app prints the real link itself.
 
 ## RULES
 
@@ -262,6 +264,10 @@ class Director:
         # Kept verbatim so the Scout cannot quietly drop part of the request --
         # "greet my audience" was getting lost between enrichment and the model.
         self.user_idea = ""
+        # The most recent photo handle (capture or uploaded file).
+        # The transform ALWAYS uses this, so retaking a photo just
+        # works -- the newest one wins, no matter what the model passes.
+        self.last_photo = ""
 
     def _ask(self, who: str, text: str) -> str:
         r = httpx.post(
@@ -287,10 +293,15 @@ class Director:
         # Wrap the preservation clause around the idea before it reaches the
         # model. Not left to the prompt: this is the difference between "your
         # audience, dancing" and "some other people, somewhere else".
-        if name == "vision_transform_image" and args.get("instruction"):
+        if name == "vision_transform_image":
             args = dict(args)
-            args["instruction"] = PRESERVE_IMAGE.format(
-                idea=args["instruction"].strip(), asked=self.user_idea)
+            # Always paint the NEWEST photo, whatever handle the model chose --
+            # so "take another photo" then "make them dance" uses the retake.
+            if self.last_photo:
+                args["image_handle"] = self.last_photo
+            if args.get("instruction"):
+                args["instruction"] = PRESERVE_IMAGE.format(
+                    idea=args["instruction"].strip(), asked=self.user_idea)
         elif name == "vision_generate_video" and args.get("instruction"):
             args = dict(args)
             args["instruction"] = PRESERVE_VIDEO.format(
@@ -304,6 +315,69 @@ class Director:
             with _Ticker(name, SLOW[name]):
                 return await tools.call(name, args)
         return await tools.call(name, args)
+
+    async def _offer_publish(self, credited: dict) -> None:
+        """After the film plays, ask whether to publish it -- which needs a
+        signed-in person.
+
+        Publishing is the one action that reaches the real world, so we ask,
+        and the gateway only allows it for an authenticated user. We sign in
+        FIRST and reconnect, then call publish on an authenticated session --
+        so publish is never attempted without a token (which the gateway
+        refuses, and which surfaces as an ugly cancellation).
+        """
+        handle = credited.get("video_handle")
+        if not handle:
+            return
+        try:
+            ans = (await asyncio.to_thread(
+                input,
+                "\n  \033[1mPublish this film to GitHub?\033[0m  "
+                "you'll sign in with Keycloak  \033[2m[y/N]\033[0m \u203a "
+            )).strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print(flush=True)
+            return
+        if ans not in ("y", "yes", "publish"):
+            print("  \033[2mnot published — the film is still on screen\033[0m",
+                  flush=True)
+            return
+
+        # Sign in only if there is no live token already.
+        if not auth.token():
+            print("  \U0001F511  \033[2mopening your browser to sign in\033[0m",
+                  flush=True)
+            try:
+                res = await asyncio.to_thread(auth.login)
+            except Exception as exc:  # noqa: BLE001
+                print(f"  \033[33m! sign-in failed: {exc}\033[0m", flush=True)
+                return
+            if not res.get("ok"):
+                print(f"  \033[33m! sign-in did not complete: "
+                      f"{res.get('error')}\033[0m", flush=True)
+                return
+            print(f"  \033[2m✓ signed in as {res['user']}\033[0m", flush=True)
+            # mcpAuthentication binds identity at connect, so the session
+            # opened without a token must be reopened for the token to count.
+            await tools.reset()
+
+        try:
+            with _Ticker("publish_publish_video",
+                         SLOW.get("publish_publish_video", 20)):
+                await tools.call("publish_publish_video", {"video_handle": handle})
+        except (KeyboardInterrupt, asyncio.CancelledError):
+            raise
+        except Exception as exc:  # noqa: BLE001
+            print(f"  \033[33m! could not publish: {exc}\033[0m", flush=True)
+            return
+        print("  \u2601\uFE0F  \033[2mpublished\033[0m", flush=True)
+        repo = os.environ.get("GITHUB_REPO", "").split("#")[0].strip()
+        tag = os.environ.get("GITHUB_RELEASE_TAG", "").split("#")[0].strip()
+        if repo and tag:
+            self._closer = (f"You can download the film at "
+                            f"https://github.com/{repo}/releases/tag/{tag}")
+        else:
+            self._closer = "The film is published."
 
     async def _auto_show(self, out: dict, kind: str, caption: str) -> None:
         """Put things on screen without waiting to be asked.
@@ -336,15 +410,27 @@ class Director:
         url = (out or {}).get("url", "")
         if not url:
             return
+        # Chrome cannot drive Continuity Camera (the iPhone); Safari can. Open
+        # the preview in PREVIEW_BROWSER (Safari by default) so the phone works.
+        # Set PREVIEW_BROWSER="" to use the system default browser instead.
+        app = os.environ.get("PREVIEW_BROWSER", "")  # empty = default browser
+        args = {"url": url}
+        if app:
+            args["app"] = app
         try:
-            await tools.call("stage_open_url", {"url": url})
-            print("  \U0001F5A5\uFE0F  \033[2mpreview opened in your browser\033[0m",
+            await tools.call("stage_open_url", args)
+            where = f"in {app}" if app else "in your browser"
+            print(f"  \U0001F5A5\uFE0F  \033[2mpreview opened {where}\033[0m",
                   flush=True)
         except Exception:  # noqa: BLE001 -- the URL is in the reply either way
             pass
 
     async def turn(self, text: str) -> str:
         self.user_idea = text.strip()
+        # If we publish this turn, the download link becomes the closing line,
+        # in place of whatever the model says (which cannot know the URL and
+        # tends to narrate stale state like "the film is now playing").
+        self._closer = ""
         with tracing.span("director.turn", **{"user.request": text[:300]}):
             return await self._turn(text)
 
@@ -361,7 +447,7 @@ class Director:
             msg = resp.choices[0].message
             self.messages.append(msg.model_dump(exclude_none=True))
             if not msg.tool_calls:
-                return (msg.content or "").strip()
+                return self._closer or (msg.content or "").strip()
 
             for tc in msg.tool_calls:
                 name = tc.function.name
@@ -384,6 +470,8 @@ class Director:
                     if name == "camera_preview_url":
                         await self._auto_open(out)
                     elif name == "camera_capture" or name == "camera_load_image":
+                        if isinstance(out, dict) and out.get("image_handle"):
+                            self.last_photo = out["image_handle"]   # newest wins
                         await self._auto_show(out, "image", "The cast")
                     elif name == "post_add_credits":
                         await self._auto_show(out, "video", "The film")
@@ -393,6 +481,9 @@ class Director:
                             await tools.call("stage_announce", {"en": READY_PHRASE})
                         except Exception:  # noqa: BLE001
                             pass
+                        # Ask whether to publish, then (if yes) sign in and
+                        # publish -- deterministic, and off the model's plate.
+                        await self._offer_publish(out)
                 except Exception as exc:  # noqa: BLE001
                     out = {"error": str(exc)}
                     print(f"    \033[31m! {exc}\033[0m", flush=True)

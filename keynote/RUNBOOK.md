@@ -42,6 +42,22 @@ tail -f logs/agentgateway.log | grep --line-buffered a2a
 
 - `cast` is the companies actually in the room (the file has no extension).
 - Camera physically pointed at the audience, not at you.
+- **Camera choice.** The camera lives in the **browser** (getUserMedia). Say
+  *launch the camera* and the preview opens in **Safari** (`PREVIEW_BROWSER` in
+  .env) -- because **Chrome cannot drive Continuity Camera / the iPhone** (a
+  known Chrome bug), but Safari can. Allow camera access, then pick from the
+  **Camera** dropdown; the iPhone appears by name and the phone shows a
+  "Connected" banner. The agent-driven *take the photo* + 3-2-1 countdown is
+  unchanged. Built-in FaceTime camera works in any browser and is the safe
+  fallback -- pick it from the same dropdown.
+
+
+  **Getting the iPhone to show up:** it is not a "connect" prompt — macOS
+  exposes the phone as a camera once Continuity Camera is on. iPhone + Mac on
+  the same Apple ID, Wi-Fi and Bluetooth on both; iPhone: Settings > General >
+  AirPlay & Handoff > **Continuity Camera** on; phone nearby, held still
+  (landscape). Then it appears in the picker by name (e.g. "Lin's iPhone
+  Camera"). If it is not listed yet, click **Rescan** — no restart.
 - Consent line ready, in both languages.
 - Backup recording open in a tab you can reach in one click.
 
@@ -219,3 +235,40 @@ Two things to know before you try it live:
   failure lands on the call you mean it to.
 - **Comment the tripwire back out before the real run.** `./imagine preflight`
   warns you if you left it live.
+
+---
+
+## The publish-login beat
+
+**Before the talk** (Keycloak must be up before the gateway):
+
+```bash
+docker run -d --name keycloak -p 8080:8080 \
+  -e KC_BOOTSTRAP_ADMIN_USERNAME=admin -e KC_BOOTSTRAP_ADMIN_PASSWORD=admin \
+  -v ~/mcp-auth-demo/auth-server/keycloak-seed2:/opt/keycloak/data/import:ro \
+  quay.io/keycloak/keycloak:26.4.1 start-dev --import-realm
+./imagine up            # refuses to start if Keycloak is down
+./imagine verify        # 3b confirms publish is gated
+```
+
+**On stage:**
+
+1. Take the photo, describe the film. The pipeline runs to the credits.
+2. The film plays and holds on the last frame (the cast roll).
+3. The Director asks: **Publish this film to GitHub? [y/N]**. Answer `y`.
+4. Your browser opens on Keycloak. Log in as **linsun**.
+5. It publishes and prints the download link as the closing line:
+   `You can download the film at https://github.com/linsun/imagine/releases/tag/agntcon-mcpcon-japan-2026`
+   — read it out or put it on a slide. (Answer `N` to skip; the film is on
+   screen either way.)
+
+Say it plainly: *publishing is the one thing that acts in the real world, so it
+takes a person — the agent can make the film, but it can't ship it as me.*
+
+**If Keycloak dies at the venue:** `./imagine auth off`, then `./imagine up`.
+Publishing goes back to the gateway-held token with no login. `preflight` warns
+you if auth is on and Keycloak is down.
+
+Token lifetime in the seed realm is 300s — fine, because login happens live at
+publish time, not before. If you rehearse publish and then wait, just log in
+again; the agent will re-prompt if the token has expired.

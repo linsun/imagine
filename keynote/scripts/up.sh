@@ -5,6 +5,9 @@ cd "$(dirname "$0")/.."
 set -a; . ./.env; set +a
 
 PY="$PWD/.venv/bin/python"
+# The publish MCP target runs with clear_env, so agentgateway has to be told
+# where the venv is -- the config reads $VENV_BIN.
+export VENV_BIN="$PWD/.venv/bin"
 [ -x "$PY" ] || { echo "no venv -- run: make install"; exit 1; }
 [ -n "${GEMINI_API_KEY:-}" ] || { echo "GEMINI_API_KEY not set in ./.env"; exit 1; }
 mkdir -p .pids logs
@@ -26,15 +29,32 @@ MCP_PORT="${VISION_MCP_PORT:-8000}" \
   start vision-mcp "$PY" -c \
   "import sys; sys.path.insert(0,'../mcp-server'); from vision_mcp.server import main; main()"
 
-start viewfinder "$PY" -m servers.viewfinder
-
-# The AGENTS get no provider credentials. Not "they don't use them" -- they
-# are not in the process environment at all, so there is nothing to leak, log
-# or accidentally fall back to. They reach the models with AGW_VIRTUAL_KEY and
-# nothing else. `./imagine verify` checks this on the LIVE processes.
+# These processes get NO provider credentials -- not "they don't use them",
+# they are not in the environment at all, so nothing can leak or fall back.
+# The agents reach the models with AGW_VIRTUAL_KEY; the viewfinder is just a
+# camera and needs none. vision-mcp is the ONE exception (it keeps GEMINI for
+# the Veo hop) so it is started without this wrapper. verify 1c checks the
+# live processes.
 NOKEYS="env -u GEMINI_API_KEY -u GOOGLE_API_KEY -u OPENAI_API_KEY -u GITHUB_TOKEN"
-start scout $NOKEYS "$PY" -m agent.crew scout
-start dp    $NOKEYS "$PY" -m agent.crew dp
+start viewfinder $NOKEYS "$PY" -m servers.viewfinder
+start scout      $NOKEYS "$PY" -m agent.crew scout
+start dp         $NOKEYS "$PY" -m agent.crew dp
+
+# MCP auth is on when `mcpAuthentication:` is uncommented. The gateway loads
+# the JWKS while PARSING the config, so a missing Keycloak does not degrade
+# auth -- it rejects the ENTIRE config and nothing works. Check first.
+if grep -qE "^    mcpAuthentication:" gateway/config.yaml; then
+  iss=$(grep -m1 "^      issuer:" gateway/config.yaml | awk "{print \$2}")
+  if curl -sf -m 4 "$iss/.well-known/openid-configuration" >/dev/null 2>&1; then
+    echo "  keycloak: up ($iss)"
+  else
+    echo
+    echo "  !! MCP auth is ON but Keycloak is not answering at $iss"
+    echo "     the gateway will refuse to load. Start Keycloak, or:"
+    echo "       ./imagine auth off       (drop the publish login for now)"
+    exit 1
+  fi
+fi
 
 sleep 2
 # agentgateway last: it spawns the stdio MCP servers itself

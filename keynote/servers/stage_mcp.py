@@ -70,17 +70,22 @@ def announce(en: str, ja: str = "") -> dict:
 
 
 @mcp.tool
-def open_url(url: str) -> dict:
-    """Open a URL on this machine's screen, in the default browser.
+def open_url(url: str, app: str = "") -> dict:
+    """Open a URL on this machine's screen.
 
-    Used for the live viewfinder: the preview is a web page, and nobody wants
-    to copy a localhost URL out of a terminal in front of a room.
+    Used for the live viewfinder. `app` names a specific browser (macOS), e.g.
+    "Safari" -- which matters for the camera: Chrome cannot drive Continuity
+    Camera (the iPhone), Safari can, so the preview opens there when asked.
 
     Never raises -- if the browser cannot be opened you still have the URL.
     """
     if not url.startswith(("http://", "https://")):
         raise RuntimeError("open_url() takes an http(s) URL")
     try:
+        if app and _have(OPEN_CMD):
+            subprocess.Popen([OPEN_CMD, "-a", app, url],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return {"ok": True, "url": url, "opened_with": f"{OPEN_CMD} -a {app}"}
         if _have(OPEN_CMD):
             subprocess.Popen([OPEN_CMD, url],
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
