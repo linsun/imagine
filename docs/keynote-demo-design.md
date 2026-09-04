@@ -17,7 +17,7 @@ of a hosted gallery.
 Projects, LLC." kgateway and agentregistry are the CNCF ones. AGNTCon + MCPCon Japan
 is an LF event — this gets noticed.
 
-**Pin v1.4.1.** v1.5.0-beta.1 landed 2026-08-24; cadence is a minor every 4–5 weeks.
+**Pin ** v1.5.0 landed 2026-08-27; cadence is a minor every 4–5 weeks.
 
 ---
 
