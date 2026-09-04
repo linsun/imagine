@@ -19,3 +19,6 @@ data.db-wal
 _to_delete/
 # cached Keycloak access token -- never commit a bearer token
 .token.json
+# local copy of the Keycloak realm export (user password hash + client
+# config). The demo reads its seed from ~/mcp-auth-demo, not from here.
+keycloak-seed/

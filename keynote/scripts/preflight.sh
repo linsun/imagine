@@ -44,6 +44,21 @@ else
   o "MCP auth is off (publishing needs no login)"
 fi
 
+# --- sign-in callback port (MCP Inspector owns 6274) ---------------------
+CBPORT=6274
+if command -v lsof >/dev/null 2>&1; then
+  hold=$(lsof -nP -iTCP:$CBPORT -sTCP:LISTEN 2>/dev/null | awk 'NR==2{print $1}')
+elif (exec 3<>/dev/tcp/127.0.0.1/$CBPORT) 2>/dev/null; then
+  hold="something"
+fi
+if [ -n "${hold:-}" ]; then
+  w "port $CBPORT is IN USE (held by: ${hold}) -- most likely MCP Inspector."
+  w "  it will intercept the Keycloak sign-in redirect, so publishing hangs"
+  w "  with 'no callback'. Quit it before the demo, or paste the URL at login."
+else
+  o "sign-in callback port $CBPORT is free (no Inspector squatting it)"
+fi
+
 # --- GitHub via the gateway ----------------------------------------------
 if grep -q "host: api.github.com:443" gateway/config.yaml; then
   o "GitHub routed through the gateway (backendAuth holds the token)"

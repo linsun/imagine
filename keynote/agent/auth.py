@@ -25,6 +25,7 @@ import base64
 import hashlib
 import http.server
 import json
+import select
 import socket
 import os
 import secrets
@@ -131,6 +132,41 @@ async def attach_bearer(request) -> None:
 
 # --- the flow --------------------------------------------------------------
 
+def _port_in_use(port: int) -> bool:
+    """True if something is ALREADY listening on this port (v4 or v6).
+
+    Called before we bind our own callback server, so a hit means a FOREIGN
+    listener -- almost always MCP Inspector, which owns 6274 and would swallow
+    the OAuth redirect. (Our server sets SO_REUSEADDR, so on macOS it binds
+    over Inspector without error and the callback silently goes to the wrong
+    process -- this is what turns that into a visible warning.)
+    """
+    for family, addr in ((socket.AF_INET, ("127.0.0.1", port)),
+                         (socket.AF_INET6, ("::1", port))):
+        try:
+            with socket.socket(family, socket.SOCK_STREAM) as sock:
+                sock.settimeout(0.3)
+                if sock.connect_ex(addr) == 0:
+                    return True
+        except OSError:
+            pass
+    return False
+
+
+def _parse_callback(text: str) -> dict:
+    """Pull the OAuth params from a pasted callback URL (or bare query string).
+
+    The fallback for when the browser signs in but the localhost redirect never
+    reaches our listener (a firewall/proxy eats the loopback hop, HTTPS-Only
+    upgrades it, or `localhost` does not resolve to 127.0.0.1). The code is
+    still sitting in the browser's address bar, so the user can paste it.
+    """
+    text = text.strip()
+    parsed = urllib.parse.urlparse(text)
+    query = parsed.query or text          # allow pasting just "code=...&state=..."
+    return {k: v[0] for k, v in urllib.parse.parse_qs(query).items()}
+
+
 def _claims(access_token: str) -> dict:
     """Decode the JWT payload. Display only -- the GATEWAY verifies it."""
     try:
@@ -219,6 +255,12 @@ def login(timeout: float = 180.0) -> dict:
 
     parsed = urllib.parse.urlparse(REDIRECT)
     port = parsed.port or 80
+    if _port_in_use(port):
+        print(f"  \033[33m! port {port} is already in use -- most likely MCP "
+              f"Inspector.\033[0m", flush=True)
+        print("  \033[2mit owns this port and will intercept the sign-in "
+              "redirect; quit it, or paste the URL when prompted below.\033[0m",
+              flush=True)
     try:
         server = _DualStack(("::", port), _Handler)   # dual-stack: v4 and v6
     except OSError as exc:
@@ -250,9 +292,40 @@ def login(timeout: float = 180.0) -> dict:
           flush=True)
     _open_browser(url)
 
+    # Wait for the callback AND watch stdin at the same time. On most machines
+    # the browser returns the redirect to our listener and this is invisible.
+    # When the loopback hop is blocked (firewall/proxy, HTTPS-Only upgrade, or
+    # `localhost` not resolving to 127.0.0.1), the browser still shows the
+    # ?code=... URL in its address bar -- paste it here and sign-in completes
+    # without the loopback. select() polls both so a paste is accepted whenever
+    # it comes, without a premature prompt while you are still typing your
+    # Keycloak password.
+    print("  \033[2mif the browser doesn't return on its own, paste the "
+          "address-bar URL here and press Enter\033[0m", flush=True)
     deadline = time.time() + timeout
+    stdin_open = True
     while not _Handler.result and time.time() < deadline:
-        time.sleep(0.2)
+        if stdin_open:
+            try:
+                readable, _, _ = select.select([sys.stdin], [], [], 0.5)
+            except (OSError, ValueError):
+                stdin_open = False
+                continue
+            if readable:
+                raw = sys.stdin.readline()
+                if raw == "":                     # EOF -- stop watching stdin
+                    stdin_open = False
+                    continue
+                line = raw.strip()
+                if line:
+                    pasted = _parse_callback(line)
+                    if pasted.get("code"):
+                        _Handler.result = pasted
+                        break
+                    print("  \033[2mno ?code=... in that -- paste the whole "
+                          "address-bar URL\033[0m", flush=True)
+        else:
+            time.sleep(0.5)
     server.shutdown()
 
     got = _Handler.result
@@ -280,8 +353,19 @@ def login(timeout: float = 180.0) -> dict:
                 timeout=30) as r:
             tok = json.load(r)
     except urllib.error.HTTPError as exc:
-        return {"ok": False, "error": f"token endpoint {exc.code}: "
-                                      f"{exc.read().decode('utf-8', 'replace')[:300]}"}
+        body = exc.read().decode("utf-8", "replace")
+        try:
+            err = json.loads(body)
+        except ValueError:
+            err = {}
+        if err.get("error") == "invalid_grant":
+            # Single-use, short-lived code (Keycloak accessCodeLifespan, ~60s).
+            # The usual cause here is the manual paste taking longer than that.
+            return {"ok": False, "error": (
+                "the sign-in code expired before it was used (Keycloak allows "
+                "~60s). Just run publish again -- you have a session now, so it "
+                "is instant.")}
+        return {"ok": False, "error": f"token endpoint {exc.code}: {body[:300]}"}
     except OSError as exc:
         return {"ok": False, "error": f"token endpoint unreachable: {exc}"}
 

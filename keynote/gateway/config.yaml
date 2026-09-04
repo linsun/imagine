@@ -75,7 +75,7 @@ llm:
         - name: tripwire
           limit:
             unit: Tokens
-            amount: 200000
+            amount: 200
           window:
             rolling: 24h
           onBudgetExceeded: Block
@@ -115,22 +115,12 @@ mcp:
       args:
       - -m
       - servers.publish_mcp
-      # The point of the whole exercise: this process is spawned by
-      # agentgateway, so by default it INHERITS the gateway's environment --
-      # including GITHUB_TOKEN. clearEnv wipes it and env lists back only what
-      # publishing actually needs. There is no credential here to leak.
-      # PATH must be listed explicitly or `cmd: python` will not resolve, and
-      # it has to start with the venv or the server loses fastmcp/requests.
-      # up.sh exports VENV_BIN for this. (The field is clear_env, snake_case --
-      # the only one in this file that is not camelCase.)
       clear_env: true
       env:
         PATH: ${VENV_BIN:-./.venv/bin}:/usr/bin:/bin
         HOME: /tmp
         GITHUB_REPO: $GITHUB_REPO
         GITHUB_RELEASE_TAG: $GITHUB_RELEASE_TAG
-        # One port, two prefixes. The route strips the prefix before it
-        # leaves, so /api/user arrives at api.github.com as /user.
         AGW_VIRTUAL_KEY: $AGW_VIRTUAL_KEY
         GITHUB_API: http://localhost:3004/api
         GITHUB_UPLOADS: http://localhost:3004/uploads
@@ -138,25 +128,6 @@ mcp:
     mcp:
       host: http://localhost:8000/mcp
   policies:
-    # ---- MCP authentication + authorization (Keycloak) ------------------
-    # A PERSON authorizes the one tool that acts in the real world: publish.
-    # Everything else -- camera, stage, credits, the film itself -- is
-    # ungated, so the show is not an auth demo. This is agentgateway's MCP
-    # auth feature, not the apiKey policy: the gateway validates a real JWT
-    # from Keycloak and can reason about its claims.
-    #
-    # provider: keycloak is first-class in agentgateway -- it derives the
-    # (non-standard) JWKS path, serves protected-resource metadata, and
-    # returns 401 + WWW-Authenticate so an MCP client can discover where to
-    # log in. The gateway fetches the JWKS while LOADING this file, so
-    # Keycloak must be up or the config is rejected (the running gateway
-    # keeps its old config; it does not die). ./imagine preflight checks it.
-    #
-    # audiences: publish-mcp-server -- the aud the realm's mcp:tools client
-    # scope mints. mode: optional so an unauthenticated call is not rejected
-    # at the door; the authorization rule below is what refuses it, and only
-    # for the publish target.
-    # >>> mcp-auth  (toggle with ./imagine auth on|off -- do not hand-edit)
     mcpAuthentication:
       mode: optional
       issuer: http://localhost:8080/realms/my-realm
@@ -171,13 +142,8 @@ mcp:
         bearerMethodsSupported:
         - header
     mcpAuthorization:
-      # Denylist: everything is allowed except a publish call with no
-      # authenticated subject. mcp.tool.target is the `name:` of a target
-      # above. To require a group instead of merely a login, change to:
-      #   deny: 'mcp.tool.target == "publish" && !("publishers" in jwt.groups)'
       rules:
-      - deny: 'mcp.tool.target == "publish" && !has(jwt.sub)'
-    # <<< mcp-auth
+      - deny: mcp.tool.target == "publish" && !has(jwt.sub)
     cors:
       allowOrigins:
       - http://localhost:15000
@@ -193,10 +159,6 @@ gateways:
     port: 3002
   dp-gw:
     port: 3003
-  # GitHub: ONE port, two routes. Release assets go to uploads.github.com and
-  # everything else to api.github.com -- two different services, so they are
-  # two routes selected by path prefix, not two backends on one route (that
-  # would load-balance between them) and not two hosts on one backend (same).
   github-gw:
     port: 3004
 routes:
@@ -214,11 +176,6 @@ routes:
     a2a: {}
   backends:
   - host: localhost:9102
-# The gateway holds the GitHub credential and stamps it on the way out, so the
-# publish MCP server sends none. backendAuth's default location is
-# `Authorization: Bearer <value>`, which is exactly what GitHub wants, and it
-# OVERWRITES whatever the caller sent. backendTLS is required: without it the
-# upstream hop is plain HTTP and github answers 301 to https.
 - name: github-api
   gateways:
   - github-gw
@@ -226,16 +183,6 @@ routes:
   - path:
       pathPrefix: /api
   policies:
-    # INBOUND guard. Without this, anything on this laptop that can reach :3004
-    # can act as you on GitHub -- the gateway would hand it the token. Same
-    # virtual key the agents already use for the LLM listener, so there is one
-    # identity concept in the demo rather than two, and no new service that can
-    # be down when you walk on stage.
-    #
-    # Note the shape of the hop: the caller proves WHO it is with the virtual
-    # key; the gateway then replaces that header entirely with the GitHub
-    # credential on the way out. Inbound identity and outbound credential are
-    # different things, and neither side ever holds the other's.
     apiKey:
       mode: strict
       keys:
@@ -259,16 +206,6 @@ routes:
   - path:
       pathPrefix: /uploads
   policies:
-    # INBOUND guard. Without this, anything on this laptop that can reach :3004
-    # can act as you on GitHub -- the gateway would hand it the token. Same
-    # virtual key the agents already use for the LLM listener, so there is one
-    # identity concept in the demo rather than two, and no new service that can
-    # be down when you walk on stage.
-    #
-    # Note the shape of the hop: the caller proves WHO it is with the virtual
-    # key; the gateway then replaces that header entirely with the GitHub
-    # credential on the way out. Inbound identity and outbound credential are
-    # different things, and neither side ever holds the other's.
     apiKey:
       mode: strict
       keys:

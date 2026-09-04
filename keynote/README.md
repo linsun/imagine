@@ -165,9 +165,10 @@ and `preflight` check this, and `./imagine auth off` drops the policy in one
 command if Keycloak is unavailable. Start Keycloak with your seed realm:
 
 ```bash
-docker run -d --name keycloak -p 8080:8080 \
-  -e KC_BOOTSTRAP_ADMIN_USERNAME=admin -e KC_BOOTSTRAP_ADMIN_PASSWORD=admin \
-  -v keycloak:/opt/keycloak/data/import:ro \
+docker run -d --name keycloak -p 8080:8080 -p 8443:8443 \
+  -e KC_BOOTSTRAP_ADMIN_USERNAME=admin \
+  -e KC_BOOTSTRAP_ADMIN_PASSWORD=admin \
+  -v "$(pwd)/keycloak-seed:/opt/keycloak/data/import:ro" \
   quay.io/keycloak/keycloak:26.4.1 start-dev --import-realm
 ```
 

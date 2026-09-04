@@ -22,6 +22,7 @@ them. That is the point: you direct, the crew works.
 import asyncio
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -268,6 +269,8 @@ class Director:
         # The transform ALWAYS uses this, so retaking a photo just
         # works -- the newest one wins, no matter what the model passes.
         self.last_photo = ""
+        # The last credited film, so `publish` can retry without re-rendering.
+        self._last_credited: dict = {}
 
     def _ask(self, who: str, text: str) -> str:
         r = httpx.post(
@@ -379,6 +382,14 @@ class Director:
         else:
             self._closer = "The film is published."
 
+    async def publish_again(self) -> None:
+        """Retry publishing the last credited film -- e.g. after a sign-in that
+        timed out -- without re-rendering. Same path as the automatic offer."""
+        if not self._last_credited.get("video_handle"):
+            print("  \033[2mno film to publish yet -- make one first\033[0m", flush=True)
+            return
+        await self._offer_publish(self._last_credited)
+
     async def _auto_show(self, out: dict, kind: str, caption: str) -> None:
         """Put things on screen without waiting to be asked.
 
@@ -483,6 +494,7 @@ class Director:
                             pass
                         # Ask whether to publish, then (if yes) sign in and
                         # publish -- deterministic, and off the model's plate.
+                        self._last_credited = out      # so `publish` can retry
                         await self._offer_publish(out)
                 except Exception as exc:  # noqa: BLE001
                     out = {"error": str(exc)}
@@ -519,9 +531,15 @@ async def main() -> None:
   use the photo at ~/Desktop/room.jpg
   take the photo, count down from 3
   <describe the film>            runs scene, still, film, credits, publish
+  publish                        publish the last film again (signs in if needed)
   stop the camera
   ctrl-c cancels the current step · ctrl-c at the prompt quits\033[0m
 """)
+            continue
+        if re.search(r"\bpublish\b", text.lower()):
+            # "publish" / "publish again" -> retry the last film through the
+            # sign-in + publish path, instead of letting the model deflect.
+            await d.publish_again()
             continue
         try:
             print(f"\n\033[1mdirector ›\033[0m {await d.turn(text)}\n")
@@ -537,7 +555,7 @@ async def main() -> None:
 
     await tools.close()
     print("\n\033[2mbye. the gateway and camera are still up — "
-          "`make down` stops them, `make camera-off` just releases the camera.\033[0m")
+          "`./imagine down` stops them, `./imagine camera off` just releases the camera.\033[0m")
 
 
 def run() -> None:
