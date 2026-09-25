@@ -86,8 +86,27 @@ def load() -> dict:
     return _cached
 
 
+# In Kubernetes the Director has no browser and no token cache: the person signs
+# in with the terminal client on the laptop, which sends the token with each
+# request. a2a_server hands it over here. Module-level, not a contextvar: the MCP
+# transport sends from its own background task (see tracing.set_pending).
+_forwarded = ""
+
+
+def use_forwarded(access_token: str) -> bool:
+    """Use this caller's token for MCP calls. True if it changed -- the MCP
+    session must then be reopened, since the gateway binds identity at connect."""
+    global _forwarded
+    changed = access_token != _forwarded
+    _forwarded = access_token
+    return changed
+
+
 def token() -> str:
     """The access token, or "" if there is none or it has expired."""
+    if _forwarded:
+        exp = _claims(_forwarded).get("exp", 0)
+        return _forwarded if exp > time.time() + 5 else ""
     t = load()
     if not t.get("access_token"):
         return ""
