@@ -5,3 +5,4 @@ uvicorn[standard]==0.34.3
 httpx==0.28.1
 opentelemetry-sdk==1.29.0
 opentelemetry-exporter-otlp-proto-grpc==1.29.0
+opentelemetry-exporter-otlp-proto-http==1.29.0

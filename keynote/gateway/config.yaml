@@ -21,7 +21,13 @@ llm:
     provider: gemini
     params:
       model: gemini-3.6-flash
-      apiKey: $GEMINI_API_KEY
+    # Send the key as x-goog-api-key. Google's newer API keys ("AQ." prefix)
+    # are rejected as a Bearer token on the native API ("Expected OAuth 2
+    # access token"), which is how params.apiKey sends it.
+    auth:
+      key:
+        value: $GEMINI_API_KEY
+        location: {header: {name: x-goog-api-key}}
     health:
       eviction:
         consecutiveFailures: 2
@@ -41,13 +47,25 @@ llm:
     provider: gemini
     params:
       model: gemini-2.5-flash-image
-      apiKey: $GEMINI_API_KEY
+    # Send the key as x-goog-api-key. Google's newer API keys ("AQ." prefix)
+    # are rejected as a Bearer token on the native API ("Expected OAuth 2
+    # access token"), which is how params.apiKey sends it.
+    auth:
+      key:
+        value: $GEMINI_API_KEY
+        location: {header: {name: x-goog-api-key}}
   - name: gemini-2.5-flash-image
     visibility: public
     provider: gemini
     params:
       model: gemini-2.5-flash-image
-      apiKey: $GEMINI_API_KEY
+    # Send the key as x-goog-api-key. Google's newer API keys ("AQ." prefix)
+    # are rejected as a Bearer token on the native API ("Expected OAuth 2
+    # access token"), which is how params.apiKey sends it.
+    auth:
+      key:
+        value: $GEMINI_API_KEY
+        location: {header: {name: x-goog-api-key}}
   virtualModels:
   - name: director
     routing:
@@ -61,7 +79,7 @@ llm:
     apiKey:
       mode: strict
       keys:
-      - keyHash: sha256:2a496f3cc41dbc19edf5213901c31f2aba2f68028fe28d991317a412ce10d616
+      - keyHash: sha256:71782121460ab27fcf73cd70de437322aeb5f30f85183688a843b398469bc8e0
         metadata:
           name: director
         budgets:
@@ -186,7 +204,7 @@ routes:
     apiKey:
       mode: strict
       keys:
-      - keyHash: sha256:2a496f3cc41dbc19edf5213901c31f2aba2f68028fe28d991317a412ce10d616
+      - keyHash: sha256:71782121460ab27fcf73cd70de437322aeb5f30f85183688a843b398469bc8e0
         metadata:
           name: publish
     urlRewrite:
@@ -209,7 +227,7 @@ routes:
     apiKey:
       mode: strict
       keys:
-      - keyHash: sha256:2a496f3cc41dbc19edf5213901c31f2aba2f68028fe28d991317a412ce10d616
+      - keyHash: sha256:71782121460ab27fcf73cd70de437322aeb5f30f85183688a843b398469bc8e0
         metadata:
           name: publish
     urlRewrite:

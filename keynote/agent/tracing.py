@@ -32,7 +32,6 @@ _inject = None
 if ENABLED:
     try:
         from opentelemetry import trace
-        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
         from opentelemetry.sdk.resources import Resource
         from opentelemetry.sdk.trace import TracerProvider
         from opentelemetry.sdk.trace.export import BatchSpanProcessor
@@ -41,15 +40,47 @@ if ENABLED:
         )
 
         provider = TracerProvider(resource=Resource.create({"service.name": SERVICE}))
-        provider.add_span_processor(
-            BatchSpanProcessor(OTLPSpanExporter(endpoint=OTLP, insecure=True))
-        )
+        # gRPC (4317) on the laptop. In the cluster the Director is a Substrate
+        # actor whose traffic leaves through an egress tunnel, so it uses plain
+        # OTLP/HTTP (4318) instead: OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf.
+        if os.environ.get("OTEL_EXPORTER_OTLP_PROTOCOL", "grpc") == "http/protobuf":
+            from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
+                OTLPSpanExporter as HTTPExporter,
+            )
+            exporter = HTTPExporter(endpoint=OTLP.rstrip("/") + "/v1/traces")
+        else:
+            from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+            exporter = OTLPSpanExporter(endpoint=OTLP, insecure=True)
+        provider.add_span_processor(BatchSpanProcessor(exporter))
         trace.set_tracer_provider(provider)
         _tracer = trace.get_tracer(SERVICE)
         _inject = TraceContextTextMapPropagator().inject
         TRACING = True
     except ImportError:
         pass
+
+
+def flush(timeout_ms: int = 5000) -> None:
+    """Send buffered spans now -- e.g. at the end of a turn, before the actor
+    may be suspended."""
+    if TRACING:
+        trace.get_tracer_provider().force_flush(timeout_ms)
+
+
+@contextmanager
+def continue_from(carrier: dict):
+    """Continue the caller's trace: spans started inside become children of the
+    W3C `traceparent` in `carrier` (e.g. the incoming request's headers). With no
+    trace context there, this does nothing and spans start a new trace."""
+    if not TRACING or not carrier.get("traceparent"):
+        yield
+        return
+    from opentelemetry import context
+    token = context.attach(TraceContextTextMapPropagator().extract(carrier))
+    try:
+        yield
+    finally:
+        context.detach(token)
 
 
 @contextmanager
