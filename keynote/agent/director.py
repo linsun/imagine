@@ -60,6 +60,11 @@ do not retry it with different wording.
    do NOT call anything else, and do NOT capture. Say the preview is up, in one
    short sentence, and include the URL in case they need it.
 
+**2b. "Use my latest photo", "the photo I just sent", "the drone shot".**
+   camera_latest_photo(). That is the newest photo sent from the phone (a
+   drone shot arrives the same way). It is shown automatically. Say what you
+   got in one sentence. Then STOP. Do not start the film.
+
 **2a. A file path, or "use this photo".**
    camera_load_image(path=<what they said>). Paths like ~/Desktop/room.jpg work.
    If they name a folder, camera_list_images(directory=...) first and show the
@@ -146,6 +151,7 @@ STEP = {
     "camera_preview_url":    ("\U0001F4F7", "finding the camera"),
     "camera_capture":        ("\U0001F4F8", "taking the photo"),
     "camera_load_image":     ("\U0001F5BC\uFE0F", "loading the photo"),
+    "camera_latest_photo":   ("\U0001F4F2", "fetching the photo from the phone"),
     "camera_list_images":    ("\U0001F5C2\uFE0F", "looking for photos"),
     "camera_release":        ("\U0001F4F4", "putting the camera down"),
     "camera_resume":         ("\U0001F4F7", "picking the camera up"),
@@ -208,18 +214,21 @@ PRESERVE_VIDEO = (
 )
 
 
-def _echo(name: str, args: dict) -> None:
+def _tty(text: str) -> None:
+    print(text, flush=True)
+
+
+def _echo(name: str, args: dict, emit=_tty) -> None:
     """One quiet line per step. The prompts are for you, not for the room."""
     icon, label = STEP.get(name, ("\u2022", name))
     if label:
-        print(f"  {icon}  \033[2m{label}\033[0m", flush=True)
+        emit(f"  {icon}  \033[2m{label}\033[0m")
     if not VERBOSE:
         return
     for k in ("instruction", "prompt", "scene", "title", "subtitle"):
         v = args.get(k)
         if isinstance(v, str) and v.strip():
-            print(f"      \033[2m{k}:\033[0m \033[3m{v if len(v) <= 700 else v[:700] + ' …'}\033[0m",
-                  flush=True)
+            emit(f"      \033[2m{k}:\033[0m \033[3m{v if len(v) <= 700 else v[:700] + ' …'}\033[0m")
 
 
 class _Ticker:
@@ -254,7 +263,13 @@ class _Ticker:
 
 
 class Director:
-    def __init__(self) -> None:
+    def __init__(self, emit=_tty, interactive: bool = True) -> None:
+        # emit: where progress lines go -- the terminal, or an A2A stream when
+        # the Director runs as a server (in Kubernetes, behind kagent).
+        # interactive: False when there is no keyboard -- nothing may call
+        # input(), and publishing becomes a follow-up turn ("publish").
+        self.emit = emit
+        self.interactive = interactive
         # The gateway holds the provider credential. What we send is the
         # VIRTUAL key -- an identity the gateway budgets, not something that
         # can talk to Gemini. If this ever has to be a real provider key, the
@@ -271,6 +286,7 @@ class Director:
         self.last_photo = ""
         # The last credited film, so `publish` can retry without re-rendering.
         self._last_credited: dict = {}
+        self._closer = ""
 
     def _ask(self, who: str, text: str) -> str:
         r = httpx.post(
@@ -311,15 +327,15 @@ class Director:
                 idea=args["instruction"].strip())
 
         if name == "ask_scout":
-            return {"scene": self._ask("scout", args["instruction"])}
+            return {"scene": await asyncio.to_thread(self._ask, "scout", args["instruction"])}
         if name == "ask_dp":
-            return {"direction": self._ask("dp", args["scene"])}
-        if name in SLOW:
+            return {"direction": await asyncio.to_thread(self._ask, "dp", args["scene"])}
+        if name in SLOW and self.interactive:
             with _Ticker(name, SLOW[name]):
                 return await tools.call(name, args)
         return await tools.call(name, args)
 
-    async def _offer_publish(self, credited: dict) -> None:
+    async def _offer_publish(self, credited: dict, ask_first: bool = False) -> None:
         """After the film plays, ask whether to publish it -- which needs a
         signed-in person.
 
@@ -332,6 +348,13 @@ class Director:
         handle = credited.get("video_handle")
         if not handle:
             return
+        if not self.interactive and not ask_first:
+            self._closer = ("The film is on the stage screen. "
+                            "Say \"publish\" to put it on GitHub.")
+            return
+        if not self.interactive:
+            await self._publish(handle)
+            return
         try:
             ans = (await asyncio.to_thread(
                 input,
@@ -342,38 +365,44 @@ class Director:
             print(flush=True)
             return
         if ans not in ("y", "yes", "publish"):
-            print("  \033[2mnot published — the film is still on screen\033[0m",
-                  flush=True)
+            print("  \033[2mnot published — the film is still on screen\033[0m")
             return
 
-        # Sign in only if there is no live token already.
-        if not auth.token():
-            print("  \U0001F511  \033[2mopening your browser to sign in\033[0m",
-                  flush=True)
+        await self._publish(handle)
+
+    async def _publish(self, handle: str) -> None:
+        # Sign in only if there is no live token already. Headless there is no
+        # browser to sign in with; the gateway decides whether that is enough.
+        if self.interactive and not auth.token():
+            self.emit("  \U0001F511  \033[2mopening your browser to sign in\033[0m")
             try:
                 res = await asyncio.to_thread(auth.login)
             except Exception as exc:  # noqa: BLE001
-                print(f"  \033[33m! sign-in failed: {exc}\033[0m", flush=True)
+                self.emit(f"  \033[33m! sign-in failed: {exc}\033[0m")
                 return
             if not res.get("ok"):
-                print(f"  \033[33m! sign-in did not complete: "
-                      f"{res.get('error')}\033[0m", flush=True)
+                self.emit(f"  \033[33m! sign-in did not complete: "
+                      f"{res.get('error')}\033[0m")
                 return
-            print(f"  \033[2m✓ signed in as {res['user']}\033[0m", flush=True)
+            self.emit(f"  \033[2m✓ signed in as {res['user']}\033[0m")
             # mcpAuthentication binds identity at connect, so the session
             # opened without a token must be reopened for the token to count.
             await tools.reset()
 
         try:
-            with _Ticker("publish_publish_video",
-                         SLOW.get("publish_publish_video", 20)):
+            if self.interactive:
+                with _Ticker("publish_publish_video",
+                             SLOW.get("publish_publish_video", 20)):
+                    await tools.call("publish_publish_video", {"video_handle": handle})
+            else:
+                _echo("publish_publish_video", {}, self.emit)
                 await tools.call("publish_publish_video", {"video_handle": handle})
         except (KeyboardInterrupt, asyncio.CancelledError):
             raise
         except Exception as exc:  # noqa: BLE001
-            print(f"  \033[33m! could not publish: {exc}\033[0m", flush=True)
+            self.emit(f"  \033[33m! could not publish: {exc}\033[0m")
             return
-        print("  \u2601\uFE0F  \033[2mpublished\033[0m", flush=True)
+        self.emit("  \u2601\uFE0F  \033[2mpublished\033[0m")
         repo = os.environ.get("GITHUB_REPO", "").split("#")[0].strip()
         tag = os.environ.get("GITHUB_RELEASE_TAG", "").split("#")[0].strip()
         if repo and tag:
@@ -382,13 +411,15 @@ class Director:
         else:
             self._closer = "The film is published."
 
-    async def publish_again(self) -> None:
+    async def publish_again(self) -> str:
         """Retry publishing the last credited film -- e.g. after a sign-in that
         timed out -- without re-rendering. Same path as the automatic offer."""
         if not self._last_credited.get("video_handle"):
-            print("  \033[2mno film to publish yet -- make one first\033[0m", flush=True)
-            return
-        await self._offer_publish(self._last_credited)
+            self.emit("  \033[2mno film to publish yet -- make one first\033[0m")
+            return "No film to publish yet -- make one first."
+        self._closer = ""
+        await self._offer_publish(self._last_credited, ask_first=True)
+        return self._closer or "The film was not published."
 
     async def _auto_show(self, out: dict, kind: str, caption: str) -> None:
         """Put things on screen without waiting to be asked.
@@ -403,13 +434,12 @@ class Director:
         try:
             shown = await tools.call(
                 "stage_show", {f"{kind}_handle": handle, "caption": caption})
-            print(f"  \u25B6\uFE0F  \033[2m{caption.lower()}\033[0m", flush=True)
+            self.emit(f"  \u25B6\uFE0F  \033[2m{caption.lower()}\033[0m")
             if isinstance(shown, dict) and shown.get("holds"):
                 # The window now parks on the QR card instead of closing.
-                print("  \033[2m   (it holds on the QR code — press q to close)\033[0m",
-                      flush=True)
+                self.emit("  \033[2m   (it holds on the QR code — press q to close)\033[0m")
         except Exception as exc:  # noqa: BLE001
-            print(f"  \033[33m! could not show it: {exc}\033[0m", flush=True)
+            self.emit(f"  \033[33m! could not show it: {exc}\033[0m")
 
     async def _auto_open(self, out: dict) -> None:
         """Open the live viewfinder in the browser, without being asked.
@@ -429,10 +459,11 @@ class Director:
         if app:
             args["app"] = app
         try:
-            await tools.call("stage_open_url", args)
+            opened = await tools.call("stage_open_url", args)
+            if isinstance(opened, dict) and opened.get("ok") is False:
+                return
             where = f"in {app}" if app else "in your browser"
-            print(f"  \U0001F5A5\uFE0F  \033[2mpreview opened {where}\033[0m",
-                  flush=True)
+            self.emit(f"  \U0001F5A5\uFE0F  \033[2mpreview opened {where}\033[0m")
         except Exception:  # noqa: BLE001 -- the URL is in the reply either way
             pass
 
@@ -451,7 +482,8 @@ class Director:
 
         for _ in range(16):
             with tracing.span("director.think", **{"gen_ai.request.model": MODEL}):
-                resp = self.client.chat.completions.create(
+                resp = await asyncio.to_thread(
+                    self.client.chat.completions.create,
                     model=MODEL, messages=self.messages, tools=self.tools + LOCAL_TOOLS,
                     extra_headers=tracing.headers(),
                 )
@@ -471,16 +503,17 @@ class Director:
                                           "content": json.dumps({
                                               "refused": f"You already called {name} this "
                                                          f"turn. Move on to the next step."})})
-                    print(f"    \033[33m✋ {name} already called this turn\033[0m", flush=True)
+                    self.emit(f"    \033[33m✋ {name} already called this turn\033[0m")
                     continue
                 called.add(name)
 
-                _echo(name, args)
+                _echo(name, args, self.emit)
                 try:
                     out = await self._run_tool(name, args)
                     if name == "camera_preview_url":
                         await self._auto_open(out)
-                    elif name == "camera_capture" or name == "camera_load_image":
+                    elif name in ("camera_capture", "camera_load_image",
+                                  "camera_latest_photo"):
                         if isinstance(out, dict) and out.get("image_handle"):
                             self.last_photo = out["image_handle"]   # newest wins
                         await self._auto_show(out, "image", "The cast")
@@ -498,7 +531,7 @@ class Director:
                         await self._offer_publish(out)
                 except Exception as exc:  # noqa: BLE001
                     out = {"error": str(exc)}
-                    print(f"    \033[31m! {exc}\033[0m", flush=True)
+                    self.emit(f"    \033[31m! {exc}\033[0m")
 
                 self.messages.append({"role": "tool", "tool_call_id": tc.id,
                                       "content": json.dumps(out)[:4000]})

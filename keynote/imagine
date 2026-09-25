@@ -429,6 +429,30 @@ def cmd_clean(_args) -> int:
     return 0
 
 
+def cmd_k8s(args) -> int:
+    """The same demo with every agent and MCP server in kind (see k8s/README.md)."""
+    scripts = os.path.join(HERE, "scripts")
+    if args.action == "up":
+        return subprocess.call([os.path.join(scripts, "k8s-up.sh")])
+    if args.action == "forward":
+        return subprocess.call([os.path.join(scripts, "k8s-pf.sh")])
+    if args.action == "down":
+        return subprocess.call([os.path.join(scripts, "k8s-down.sh")])
+    if args.action == "purge":
+        return subprocess.call([os.path.join(scripts, "k8s-down.sh"), "--purge"])
+    if args.action == "status":
+        ctx = f"kind-{os.environ.get('KIND_CLUSTER', 'kind')}"
+        subprocess.call(["kubectl", "--context", ctx, "-n", "imagine", "get",
+                         "deploy,workerpool"])
+        ate = os.path.expanduser(os.environ.get(
+            "ATE_BIN", "~/src/github.com/linsun/substrate/bin/kubectl-ate"))
+        print()
+        return subprocess.call([ate, "--context", ctx, "get", "actors", "-a", "imagine"])
+    # demo: the thin client -> agentgateway :3006 -> the Director pod
+    py = VENV_PY if os.path.exists(VENV_PY) else sys.executable
+    return subprocess.call([py, "-m", "agent.client"], cwd=HERE, env=load_env())
+
+
 def main() -> int:
     p = argparse.ArgumentParser(
         prog="imagine", description=__doc__.split("\n")[0],
@@ -470,6 +494,10 @@ def main() -> int:
     add("cameras", cmd_cameras, "list camera indices (find your phone/iPhone)")
     s = add("camera", cmd_camera, "release or re-take the camera")
     s.add_argument("action", choices=["on", "off"])
+
+    s = add("k8s", cmd_k8s, "the demo on Agent Substrate: up | demo | forward | status | down | purge")
+    s.add_argument("action", nargs="?", default="demo",
+                   choices=["up", "demo", "forward", "status", "down", "purge"])
 
     s = add("jaeger", cmd_jaeger, "start/stop Jaeger for the trace view")
     s.add_argument("action", nargs="?", default="up", choices=["up", "down"])

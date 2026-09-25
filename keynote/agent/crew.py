@@ -129,4 +129,6 @@ def build(role: str) -> FastAPI:
 
 if __name__ == "__main__":
     which = sys.argv[1] if len(sys.argv) > 1 else "scout"
-    uvicorn.run(build(which), host="0.0.0.0", port=ROLES[which][1], log_level="warning")
+    # Longer than atenet-router's pooled idle connections -- see a2a_server.py.
+    uvicorn.run(build(which), host="0.0.0.0", port=ROLES[which][1], log_level="warning",
+                timeout_keep_alive=3600)

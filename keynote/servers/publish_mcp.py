@@ -290,4 +290,5 @@ def gallery_url() -> dict:
 
 
 if __name__ == "__main__":
-    mcp.run()
+    from servers._serve import serve
+    serve(mcp)

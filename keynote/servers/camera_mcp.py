@@ -18,7 +18,11 @@ from fastmcp import FastMCP
 
 mcp = FastMCP("camera")
 
-VIEWFINDER = f"http://localhost:{os.environ.get('PREVIEW_PORT', '8888')}"
+VIEWFINDER = os.environ.get(
+    "VIEWFINDER_URL", f"http://localhost:{os.environ.get('PREVIEW_PORT', '8888')}").rstrip("/")
+# What a HUMAN opens. In the cluster the MCP server reaches the viewfinder by
+# its Service name, but your browser reaches it through a port-forward.
+PUBLIC_VIEWFINDER = os.environ.get("PUBLIC_VIEWFINDER_URL", VIEWFINDER).rstrip("/")
 FALLBACK_DIR = os.environ.get("FALLBACK_IMAGES", "./fallback")
 
 _DOWN = (
@@ -39,7 +43,7 @@ def preview_url() -> dict:
         h = requests.get(f"{VIEWFINDER}/healthz", timeout=5).json()
     except Exception:  # noqa: BLE001
         raise RuntimeError(_DOWN)
-    return {"url": f"{VIEWFINDER}/", "ready": bool(h.get("has_frame")),
+    return {"url": f"{PUBLIC_VIEWFINDER}/", "ready": bool(h.get("has_frame")),
             "error": h.get("error", ""), "camera_index": h.get("camera_index")}
 
 
@@ -63,6 +67,29 @@ def capture(countdown: int = 0) -> dict:
         raise RuntimeError(f"viewfinder: {r.text[:200]}")
     return {"image_b64": base64.b64encode(r.content).decode("ascii"),
             "mime": "image/jpeg"}
+
+
+@mcp.tool
+def latest_photo() -> dict:
+    """The newest photo sent from the phone (or a drone, via the phone).
+
+    Use this when the user says "use my latest photo", "the photo I just sent",
+    "the drone shot" -- anything taken on another device rather than by the
+    live camera. Photos arrive in the photo inbox; the newest one wins.
+
+    Returns: { image_b64, mime, age_s }
+    """
+    try:
+        info = requests.get(f"{VIEWFINDER}/latest", timeout=5).json()
+        r = requests.get(f"{VIEWFINDER}/latest.jpg", timeout=15)
+    except Exception:  # noqa: BLE001
+        raise RuntimeError(_DOWN)
+    if r.status_code != 200:
+        raise RuntimeError(
+            "No photo in the inbox yet. Send one from the phone first "
+            "(the Shortcut, or the /inbox page).")
+    return {"image_b64": base64.b64encode(r.content).decode("ascii"),
+            "mime": "image/jpeg", "age_s": info.get("age_s")}
 
 
 @mcp.tool
@@ -137,4 +164,5 @@ def load_image(path: str) -> dict:
 
 
 if __name__ == "__main__":
-    mcp.run()
+    from servers._serve import serve
+    serve(mcp)

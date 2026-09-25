@@ -15,6 +15,7 @@ a room.
 """
 
 import base64
+import hashlib
 import math
 import sys
 import os
@@ -88,6 +89,13 @@ CREDITS_MAX_SECONDS = float(os.environ.get("CREDITS_MAX_SECONDS", "14"))
 SECONDS_PER_ROW = float(os.environ.get("CREDITS_SECONDS_PER_ROW", "0.5"))
 VOICE_EN = os.environ.get("VOICE_EN", "Samantha")
 VOICE_JA = os.environ.get("VOICE_JA", "Kyoko")
+# Spoken lines recorded ahead of time with macOS `say`, for hosts that have no
+# `say` -- i.e. the post-mcp pod in Kubernetes. `python -m servers.post_mcp
+# --render-voices` fills it on the Mac (scripts/k8s-up.sh does this before the
+# image build); a line with no recording falls back to espeak.
+VOICE_DIR = os.environ.get("VOICE_DIR", "./voices")
+# espeak's default English voice is male and robotic; +f3 is its female variant.
+ESPEAK_VOICE = os.environ.get("ESPEAK_VOICE", "en-us+f3")
 CRAWL_COLOR = (255, 200, 60)          # the yellow
 
 _FONTS = [
@@ -210,7 +218,11 @@ def _voice(ff: str, text: str, path: str, voice: str = "",
     if not text.strip():
         return False
     raw = path + ".src"
-    if shutil.which("say"):
+    cached = _voice_file(text, voice, rate, pitch)
+    if os.path.exists(cached):
+        # Recorded on the Mac with the real voice (see VOICE_DIR).
+        r, src = subprocess.CompletedProcess([], 0), cached
+    elif shutil.which("say"):
         name = voice or VOICE_EN
         # Fall back to the default voice if the requested one is not installed
         # -- a missing Japanese voice should cost the accent, not the line.
@@ -227,7 +239,8 @@ def _voice(ff: str, text: str, path: str, voice: str = "",
         src = raw + ".aiff"
     elif shutil.which("espeak-ng") or shutil.which("espeak"):
         exe = shutil.which("espeak-ng") or shutil.which("espeak")
-        r = subprocess.run([exe, "-w", raw + ".wav", text], capture_output=True)
+        r = subprocess.run([exe, "-v", ESPEAK_VOICE, "-w", raw + ".wav", text],
+                           capture_output=True)
         src = raw + ".wav"
     else:
         return False
@@ -240,6 +253,43 @@ def _voice(ff: str, text: str, path: str, voice: str = "",
     if r2.returncode != 0 or not os.path.exists(path):
         return False
     return _audio_seconds(path) > 0.3
+
+
+def _voice_file(text: str, voice: str = "", rate: str = "", pitch: str = "") -> str:
+    """Where the recording of this exact line (words, voice, rate, pitch) lives."""
+    key = f"{voice or VOICE_EN}|{rate}|{pitch}|{text}"
+    return os.path.join(VOICE_DIR, hashlib.sha1(key.encode()).hexdigest()[:16] + ".aiff")
+
+
+def render_voices() -> None:
+    """Record every line the film speaks, with macOS `say`, into VOICE_DIR.
+
+    Run on the Mac before building the image, so the pod -- which has no `say`
+    -- speaks with the same voice as the laptop version.
+    """
+    if not shutil.which("say"):
+        sys.exit("render-voices needs macOS `say`")
+    os.makedirs(VOICE_DIR, exist_ok=True)
+    installed = subprocess.run(["say", "-v", "?"], capture_output=True, text=True).stdout
+    lines = [(INTRO_JA, VOICE_JA, INTRO_JA_RATE, ""),
+             (INTRO_EN, VOICE_EN, INTRO_EN_RATE, INTRO_EN_PITCH),
+             (CREDITS_VOICE, "", "", "")]
+    keep = set()
+    for text, voice, rate, pitch in lines:
+        if not text.strip():
+            continue
+        out = _voice_file(text, voice, rate, pitch)
+        keep.add(os.path.basename(out))
+        name = voice or VOICE_EN
+        if name not in installed:
+            name = VOICE_EN
+        cmd = ["say", "-v", name] + (["-r", str(rate)] if rate else [])
+        cmd += ["-o", out, f"[[pbas {pitch}]]{text}" if pitch else text]
+        subprocess.run(cmd, check=True)
+        print(f"  {name:9s} {text!r} -> {out}")
+    for f in os.listdir(VOICE_DIR):      # drop recordings of lines no longer used
+        if f.endswith(".aiff") and f not in keep:
+            os.remove(os.path.join(VOICE_DIR, f))
 
 
 def _synth_pad(ff: str, seconds: float, path: str) -> bool:
@@ -856,4 +906,8 @@ def list_cast() -> dict:
 
 
 if __name__ == "__main__":
-    mcp.run()
+    if "--render-voices" in sys.argv:
+        render_voices()
+    else:
+        from servers._serve import serve
+        serve(mcp)

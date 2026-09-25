@@ -32,6 +32,19 @@ OPEN_CMD = os.environ.get("OPEN_CMD", "open")
 # SHOW_HOLD=0 goes back to closing itself.
 SHOW_HOLD = os.environ.get("SHOW_HOLD", "1") not in ("", "0", "false", "no")
 
+# In the cluster there is no Mac to shell out to: the projector is the
+# viewfinder's /stage page, open fullscreen in a browser. Set STAGE_URL to the
+# viewfinder (e.g. http://viewfinder:8888) and every tool below targets it.
+STAGE_URL = os.environ.get("STAGE_URL", "").rstrip("/")
+
+
+def _remote(path: str, data: bytes, ctype: str, **params) -> dict:
+    import requests
+    r = requests.post(f"{STAGE_URL}{path}", data=data, params=params,
+                      headers={"Content-Type": ctype}, timeout=60)
+    r.raise_for_status()
+    return r.json()
+
 
 def _have(cmd: str) -> bool:
     return shutil.which(cmd) is not None
@@ -48,6 +61,12 @@ def announce(en: str, ja: str = "") -> dict:
     Plays ANNOUNCE_SOUND first if set. Never raises -- a failed announcement
     must not break the demo.
     """
+    if STAGE_URL:
+        try:
+            _remote("/stage/say", en.encode(), "text/plain; charset=utf-8")
+            return {"ok": True, "played": ["stage-page"]}
+        except Exception as exc:  # noqa: BLE001 -- never break the show
+            return {"ok": False, "note": str(exc)}
     played = []
     try:
         if ANNOUNCE_SOUND and os.path.exists(ANNOUNCE_SOUND) and _have("afplay"):
@@ -81,6 +100,9 @@ def open_url(url: str, app: str = "") -> dict:
     """
     if not url.startswith(("http://", "https://")):
         raise RuntimeError("open_url() takes an http(s) URL")
+    if STAGE_URL:
+        # A pod cannot open a window on your laptop. The URL is in the reply.
+        return {"ok": False, "url": url, "note": "open this URL on the laptop"}
     try:
         if app and _have(OPEN_CMD):
             subprocess.Popen([OPEN_CMD, "-a", app, url],
@@ -116,6 +138,12 @@ def show(image_b64: str = "", video_b64: str = "", caption: str = "",
         raise RuntimeError("show() needs image_b64 or video_b64")
     is_video = bool(video_b64)
     data = _b64.b64decode(video_b64 or image_b64)
+    if STAGE_URL:
+        ctype = "video/mp4" if is_video else (
+            "image/jpeg" if data[:2] == b"\xff\xd8" else "image/png")
+        _remote("/stage/show", data, ctype, caption=caption)
+        return {"ok": True, "caption": caption, "played_with": "stage-page",
+                "kind": "video" if is_video else "image", "holds": False}
     suffix = ".mp4" if is_video else ".png"
     fd, path = tempfile.mkstemp(suffix=suffix, dir=os.environ.get("SHOW_DIR", None))
     with os.fdopen(fd, "wb") as f:
@@ -143,4 +171,5 @@ def show(image_b64: str = "", video_b64: str = "", caption: str = "",
 
 
 if __name__ == "__main__":
-    mcp.run()
+    from servers._serve import serve
+    serve(mcp)

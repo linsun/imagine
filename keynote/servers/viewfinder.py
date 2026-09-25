@@ -24,9 +24,25 @@ No OpenCV, no device probing here -- it is pure stdlib.
   GET  /resume                 ask the page to pick it back up
   GET  /healthz                {"ok":true,"has_frame":true,"streaming":true,...}
 
+PHOTO INBOX -- a photo taken ELSEWHERE (phone, or drone -> phone)
+  POST /upload                 raw image body (or multipart); newest upload wins
+  GET  /latest.jpg             the newest uploaded photo, normalised to JPEG
+  GET  /latest                 {"has_photo":..,"received_at":..,"age_s":..}
+  GET  /inbox                  a phone-friendly "send a photo" page
+
+STAGE -- the projector, as a web page (replaces ffplay/say when in a cluster)
+  GET  /stage                  fullscreen page: shows the photo, plays the film
+  POST /stage/show             body = image or video; ?caption=
+  POST /stage/say              body = text, spoken by the browser
+  GET  /stage/state            {"seq":..,"kind":..,"caption":..,"say":..}
+  GET  /stage/media            the bytes last shown
+
   python -m servers.viewfinder
 """
 
+import email
+import email.policy
+import io
 import json
 import math
 import os
@@ -36,12 +52,76 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 PORT = int(os.environ.get("PREVIEW_PORT", "8888"))
+# 127.0.0.1 on the laptop; 0.0.0.0 in a pod so the Service can reach it.
+HOST = os.environ.get("VIEWFINDER_HOST", "127.0.0.1")
+INBOX_DIR = os.environ.get("INBOX_DIR", "./inbox")
+# Phone and drone photos are 12-48MP. Everything downstream (base64 over MCP,
+# the gateway's 32MB buffer, Nano Banana) wants far less, so shrink on arrival.
+INBOX_MAX_EDGE = int(os.environ.get("INBOX_MAX_EDGE", "2560"))
 
 _lock = threading.Lock()
 _frame = b""             # latest JPEG bytes the browser pushed
 _last_push = 0.0
 _countdown_until = 0.0
 _paused = False          # advisory: the page drops the camera when this is set
+
+_photo = b""             # newest uploaded photo (JPEG)
+_photo_at = 0.0
+
+_stage = {"seq": 0, "kind": "", "caption": "", "say": "", "say_seq": 0,
+          "mime": ""}
+_stage_media = b""
+
+
+def _normalise(data: bytes) -> bytes:
+    """Any phone photo -> an upright JPEG no bigger than INBOX_MAX_EDGE.
+
+    iPhones default to HEIC and store rotation in EXIF; both break naive
+    consumers. Pillow (+ pillow-heif when present) fixes both. Without Pillow
+    the bytes pass through untouched, which is fine for JPEGs.
+    """
+    try:
+        from PIL import Image, ImageOps
+    except ImportError:
+        return data
+    try:
+        from pillow_heif import register_heif_opener
+        register_heif_opener()
+    except ImportError:
+        pass
+    with Image.open(io.BytesIO(data)) as im:
+        im = ImageOps.exif_transpose(im).convert("RGB")
+        im.thumbnail((INBOX_MAX_EDGE, INBOX_MAX_EDGE))
+        out = io.BytesIO()
+        im.save(out, "JPEG", quality=90)
+        return out.getvalue()
+
+
+def _first_file(body: bytes, ctype: str) -> bytes:
+    """Pull the first file part out of a multipart/form-data body."""
+    msg = email.message_from_bytes(
+        b"Content-Type: " + ctype.encode() + b"\r\n\r\n" + body,
+        policy=email.policy.HTTP)
+    for part in msg.iter_parts():
+        payload = part.get_payload(decode=True)
+        if payload and (part.get_filename() or
+                        part.get_content_maintype() == "image"):
+            return payload
+    return b""
+
+
+def _load_newest() -> None:
+    """Pick up the newest photo already in INBOX_DIR, so a restart keeps it."""
+    global _photo, _photo_at
+    try:
+        names = sorted(n for n in os.listdir(INBOX_DIR) if n.endswith(".jpg"))
+    except FileNotFoundError:
+        return
+    if names:
+        p = os.path.join(INBOX_DIR, names[-1])
+        with open(p, "rb") as f:
+            _photo = f.read()
+        _photo_at = os.path.getmtime(p)
 
 
 _PAGE = b"""<!doctype html><html><head><title>Viewfinder</title>
@@ -161,6 +241,86 @@ start(); sched();
 </body></html>"""
 
 
+# The phone's page. Behind agentgateway the key rides in the URL fragment
+# (#key=...) -- fragments never leave the phone -- and goes out as a Bearer
+# header, which is what the gateway's apiKey policy checks.
+_INBOX_PAGE = b"""<!doctype html><html><head><title>Send a photo</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+body{margin:0;min-height:100vh;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;gap:18px;background:#0b0c0e;color:#e8e8ea;
+  font:600 17px -apple-system,system-ui,sans-serif;padding:16px;box-sizing:border-box}
+label{background:#f5b642;color:#111;padding:18px 28px;border-radius:16px;font-size:20px}
+input{display:none}
+img{max-width:92vw;max-height:55vh;border-radius:12px;display:none}
+#s{opacity:.75;text-align:center}
+</style></head><body>
+<label>Send a photo<input id="f" type="file" accept="image/*"></label>
+<img id="p"><div id="s">the newest photo you send is the one the Director uses</div>
+<script>
+var key=(location.hash.match(/key=([^&]+)/)||[])[1]||'';
+var H=key?{'Authorization':'Bearer '+decodeURIComponent(key)}:{};
+var s=document.getElementById('s'), p=document.getElementById('p');
+function latest(){
+  fetch('latest.jpg?'+Date.now(),{headers:H}).then(function(r){
+    if(!r.ok) return; return r.blob().then(function(b){
+      p.src=URL.createObjectURL(b); p.style.display='block';});
+  }).catch(function(){});
+}
+document.getElementById('f').onchange=function(e){
+  var f=e.target.files[0]; if(!f) return;
+  s.textContent='sending '+Math.round(f.size/1024)+' KB ...';
+  var h=Object.assign({'Content-Type':f.type||'application/octet-stream'},H);
+  fetch('upload',{method:'POST',headers:h,body:f}).then(function(r){
+    return r.json().then(function(d){
+      s.textContent=r.ok?'sent. ask the Director to use your latest photo.'
+                        :'failed: '+(d.error||r.status);
+      if(r.ok) latest();
+    });
+  }).catch(function(err){ s.textContent='failed: '+err; });
+};
+latest();
+</script></body></html>"""
+
+
+# The projector. Replaces ffplay + `say` when the agents live in a cluster:
+# the stage MCP server posts media here, this page shows it. Browsers block
+# sound until someone clicks once, so the page starts with one click to arm.
+_STAGE_PAGE = b"""<!doctype html><html><head><title>Stage</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+html,body{margin:0;height:100%;background:#000;overflow:hidden;color:#fff;
+  font:600 18px -apple-system,system-ui,sans-serif}
+img,video{position:fixed;inset:0;width:100%;height:100%;object-fit:contain;display:none}
+#arm{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
+  background:#000;cursor:pointer;z-index:9;opacity:.9}
+#cap{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);opacity:.75}
+</style></head><body>
+<div id="arm">click once to arm the stage (sound)</div>
+<img id="i"><video id="v" playsinline></video><div id="cap"></div>
+<script>
+var seq=-1, sseq=-1, i=document.getElementById('i'), v=document.getElementById('v'),
+    cap=document.getElementById('cap'), arm=document.getElementById('arm');
+arm.onclick=function(){ arm.style.display='none';
+  try{ speechSynthesis.speak(new SpeechSynthesisUtterance('')); }catch(e){}
+  document.documentElement.requestFullscreen&&document.documentElement.requestFullscreen().catch(function(){});
+};
+function tick(){
+  fetch('/stage/state').then(function(r){return r.json();}).then(function(d){
+    if(d.seq!==seq && d.seq>0){
+      seq=d.seq; var src='/stage/media?'+d.seq; cap.textContent=d.caption||'';
+      if(d.kind==='video'){ i.style.display='none'; v.src=src; v.style.display='block';
+        v.play().catch(function(){ v.muted=true; v.play(); }); }
+      else { v.pause(); v.style.display='none'; i.src=src; i.style.display='block'; }
+    }
+    if(d.say_seq!==sseq){ var first=sseq<0; sseq=d.say_seq;
+      if(!first && d.say){ try{ speechSynthesis.speak(new SpeechSynthesisUtterance(d.say)); }catch(e){} } }
+  }).catch(function(){}).finally(function(){ setTimeout(tick,700); });
+}
+tick();
+</script></body></html>"""
+
+
 class H(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -175,12 +335,73 @@ class H(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _body(self) -> bytes:
+        # iOS Shortcuts may send chunked bodies, which BaseHTTPRequestHandler
+        # does not decode for you.
+        if "chunked" in (self.headers.get("Transfer-Encoding") or "").lower():
+            out = bytearray()
+            while True:
+                size = int(self.rfile.readline().split(b";")[0].strip() or b"0", 16)
+                if size == 0:
+                    self.rfile.readline()
+                    return bytes(out)
+                out += self.rfile.read(size)
+                self.rfile.readline()
+        n = int(self.headers.get("Content-Length", "0") or "0")
+        return self.rfile.read(n) if n else b""
+
+    def _bytes(self, data: bytes, ctype: str) -> None:
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
     def do_POST(self):
+        global _photo, _photo_at, _stage_media, _frame, _last_push
         u = urlparse(self.path)
+        if u.path == "/upload":
+            body = self._body()
+            ctype = self.headers.get("Content-Type", "")
+            if ctype.startswith("multipart/"):
+                body = _first_file(body, ctype)
+            if not body:
+                return self._json({"error": "empty upload -- send the photo as "
+                                            "the request body"}, 400)
+            try:
+                jpg = _normalise(body)
+            except Exception as exc:  # noqa: BLE001
+                return self._json({"error": f"not an image I can read: {exc}"}, 415)
+            os.makedirs(INBOX_DIR, exist_ok=True)
+            name = time.strftime("%Y%m%d-%H%M%S") + f"-{int(time.time() * 1000) % 1000:03d}.jpg"
+            with open(os.path.join(INBOX_DIR, name), "wb") as f:
+                f.write(jpg)
+            with _lock:
+                _photo, _photo_at = jpg, time.time()
+            print(f"viewfinder: photo received ({len(body)//1024} KB -> "
+                  f"{len(jpg)//1024} KB jpeg) {name}", flush=True)
+            return self._json({"ok": True, "name": name, "bytes": len(jpg)})
+
+        if u.path == "/stage/show":
+            body = self._body()
+            ctype = self.headers.get("Content-Type", "application/octet-stream")
+            q = parse_qs(u.query)
+            with _lock:
+                _stage_media = body
+                _stage.update(seq=_stage["seq"] + 1, mime=ctype,
+                              kind="video" if ctype.startswith("video") else "image",
+                              caption=(q.get("caption") or [""])[0])
+            return self._json({"ok": True, "seq": _stage["seq"]})
+
+        if u.path == "/stage/say":
+            text = self._body().decode("utf-8", "replace").strip()
+            with _lock:
+                _stage.update(say=text, say_seq=_stage["say_seq"] + 1)
+            return self._json({"ok": True})
+
         if u.path == "/push":
-            global _frame, _last_push
-            n = int(self.headers.get("Content-Length", "0") or "0")
-            data = self.rfile.read(n) if n else b""
+            data = self._body()
             if data:
                 with _lock:
                     _frame = data
@@ -195,6 +416,37 @@ class H(BaseHTTPRequestHandler):
     def do_GET(self):
         global _countdown_until, _paused
         u = urlparse(self.path)
+
+        if u.path == "/inbox":
+            return self._bytes(_INBOX_PAGE, "text/html")
+
+        if u.path == "/latest.jpg":
+            with _lock:
+                data = _photo
+            if not data:
+                return self._json({"error": "no photo yet -- send one from the "
+                                            "phone first"}, 404)
+            return self._bytes(data, "image/jpeg")
+
+        if u.path == "/latest":
+            with _lock:
+                has, at = bool(_photo), _photo_at
+            return self._json({"has_photo": has, "received_at": at,
+                               "age_s": round(time.time() - at) if has else None})
+
+        if u.path == "/stage":
+            return self._bytes(_STAGE_PAGE, "text/html")
+
+        if u.path == "/stage/state":
+            with _lock:
+                return self._json(dict(_stage))
+
+        if u.path == "/stage/media":
+            with _lock:
+                data, mime = _stage_media, _stage["mime"]
+            if not data:
+                return self._json({"error": "nothing on stage yet"}, 404)
+            return self._bytes(data, mime)
 
         if u.path == "/release":
             _paused = True
@@ -246,7 +498,8 @@ class H(BaseHTTPRequestHandler):
 
 
 def main() -> None:
-    srv = ThreadingHTTPServer(("127.0.0.1", PORT), H)
+    _load_newest()
+    srv = ThreadingHTTPServer((HOST, PORT), H)
     srv.daemon_threads = True
     print(f"viewfinder: listening on http://localhost:{PORT}/  "
           f"(browser owns the camera; open the page and allow access)", flush=True)
