@@ -90,7 +90,7 @@ llm:
         - name: tripwire
           limit:
             unit: Tokens
-            amount: 2000000
+            amount: 200
           window:
             rolling: 24h
           onBudgetExceeded: Block
