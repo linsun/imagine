@@ -188,7 +188,9 @@ READY_PHRASE = os.environ.get("READY_PHRASE", "")
 PRESERVE_IMAGE = (
     "Edit this photograph. It must remain recognisably the SAME photo of the "
     "SAME room and the SAME people: same faces, same number of people, same "
-    "clothing, same positions, same seating and layout, same camera angle. "
+    "clothing, same room layout, same camera angle. Poses, props and how high "
+    "people are may change to show the action that was asked for -- this still "
+    "is the first frame of a film, so catch them already mid-action. "
     "Do NOT relocate them, do NOT replace the background with a different "
     "place, do NOT invent new people or remove anyone. Keep every face "
     "recognisable and dignified.\n\n"
@@ -199,15 +201,18 @@ PRESERVE_IMAGE = (
 )
 
 PRESERVE_VIDEO = (
-    "Animate this photograph. Keep the SAME people, same faces, same clothing, "
-    "same room and layout. Do not relocate them or replace the setting. "
-    "Motion should be natural and gentle -- the people move, the room does "
-    "not.\n\n"
+    # The action goes FIRST and is not toned down: "motion should be natural and
+    # gentle" used to lead this prompt, and "fly on a broomstick" came out as
+    # people floating an inch above their seats. Veo weights the opening most.
     "{idea}\n\n"
+    "Make that action big, clear and unmistakable, and let it build through the "
+    "whole clip. Keep the SAME people (same faces, same clothing) in the SAME "
+    "room -- people may leave their seats or the ground if the action calls for "
+    "it, but the room itself is not replaced with another place.\n\n"
     # The user's request is deliberately NOT quoted back here. Veo treats quoted
     # text as a line to be SPOKEN -- which is why the film came out with someone
     # saying "make them dance and add some japanese vibe" out loud.
-    "Audio is music and ambience only: no dialogue, no narration, no voice-over, "
+    "Audio: music and ambience only: no dialogue, no narration, no voice-over, "
     "no singing, and nobody speaks or reads anything aloud. Crowd laughter and "
     "clapping are welcome, but no intelligible words.\n\n"
     "No text, no captions, no subtitles, no watermarks."
@@ -329,7 +334,12 @@ class Director:
         if name == "ask_scout":
             return {"scene": await asyncio.to_thread(self._ask, "scout", args["instruction"])}
         if name == "ask_dp":
-            return {"direction": await asyncio.to_thread(self._ask, "dp", args["scene"])}
+            # The DP also gets the user's own words, so the Scout's enrichment
+            # cannot water the action down ("fly" -> "float gently").
+            scene = args["scene"]
+            if self.user_idea:
+                scene = f"The user asked for: {self.user_idea}\n\nScene: {scene}"
+            return {"direction": await asyncio.to_thread(self._ask, "dp", scene)}
         if name in SLOW and self.interactive:
             with _Ticker(name, SLOW[name]):
                 return await tools.call(name, args)

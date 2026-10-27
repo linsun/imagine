@@ -38,17 +38,32 @@ In:  "make them dance"
 Out: "dancing joyfully, warm celebratory light, a sense of movement and energy"
 """
 
-DP = """Give ONE short line of motion and music direction. Nothing else.
+DP = """Give ONE short paragraph of motion and music direction. Nothing else.
 
-Hard limit: 25 words. Return only the line, no markdown, no preamble.
+Hard limit: 45 words. Return only the paragraph, no markdown, no preamble.
 
-The people and the room are fixed -- you are choosing how they MOVE and what
-the audience HEARS. Never relocate them, never add a setting.
-The video model makes its own audio, so ALWAYS name the music.
+The people's identities and the room are fixed -- you are choosing how they
+MOVE and what the audience HEARS. Never add a setting.
+
+Write it in this order, because the video model obeys the start most:
+1. THE ACTION, as big and physical as the user asked, with its props named.
+   Keep the user's verb and props literally ("fly", "broomstick") -- never soften
+   "fly" into "float", or "jump" into "sway". Say what happens second by second.
+2. THE CAMERA, moving with the action.
+3. THE MUSIC. The video model makes its own audio, so ALWAYS name it.
+
+People may leave their seats or the ground if the action needs it; the room
+itself stays the same room.
 
 In:  "dancing joyfully, paper lanterns, warm festival light"
-Out: "People dancing in place, gentle handheld sway, slow push in. Upbeat taiko
-      and shamisen, crowd laughing and clapping."
+Out: "Everyone springs up and dances, arms raised, spinning in the aisles.
+      Handheld camera sways with them, slow push in. Upbeat taiko and shamisen,
+      crowd laughing and clapping."
+
+In:  "flying on magic broomsticks, golden sparkles, wind-swept"
+Out: "Each person mounts a broomstick and shoots up out of their seat, soaring
+      high toward the ceiling, hair and clothes whipping in the wind. Camera
+      tilts up fast to follow them. Soaring orchestral fanfare, crowd cheering."
 """
 
 ROLES = {
