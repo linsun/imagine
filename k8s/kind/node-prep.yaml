@@ -1,0 +1,55 @@
+# Two node-level settings that a kind config cannot express.
+#
+#   kubectl apply -f k8s/kind/node-prep.yaml
+---
+# gVisor sandboxes reach other pods through proxy ARP/NDP on the node.
+# create-kind-cluster.sh sets these with `docker exec sysctl`, and they are lost
+# whenever the node container restarts (Docker Desktop restart, laptop reboot),
+# after which actor networking fails with no error. A DaemonSet sets them again
+# on every restart. hostNetwork puts it in the node's network namespace, which
+# is where the sysctls live.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: substrate-node-prep
+  namespace: kube-system
+  labels: {app: substrate-node-prep}
+spec:
+  selector:
+    matchLabels: {app: substrate-node-prep}
+  template:
+    metadata:
+      labels: {app: substrate-node-prep}
+    spec:
+      hostNetwork: true
+      tolerations:
+      - operator: Exists
+      initContainers:
+      - name: sysctls
+        image: busybox:1.37
+        securityContext: {privileged: true}
+        command:
+        - sh
+        - -c
+        - |
+          set -e
+          sysctl -w net.ipv4.conf.all.proxy_arp=1
+          # -e: skip rather than fail on a kernel without IPv6
+          sysctl -e -w net.ipv6.conf.all.proxy_ndp=1 || true
+      containers:
+      - name: pause
+        image: registry.k8s.io/pause:3.10
+        resources:
+          requests: {cpu: 1m, memory: 4Mi}
+---
+# Standard advertisement of the local registry (KEP-1755). Tools such as tilt
+# and ko read it. Nothing in substrate requires it; kept for parity with the script.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: local-registry-hosting
+  namespace: kube-public
+data:
+  localRegistryHosting.v1: |
+    host: "localhost:5001"
+    help: "https://kind.sigs.k8s.io/docs/user/local-registry/"

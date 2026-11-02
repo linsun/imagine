@@ -1,0 +1,20 @@
+# What the agents may reach, as a kagent EgressPolicy: the two agentgateways
+# and the OTel collector, nothing else. kagent adds its own control plane on
+# top. An origin is scheme + host + port, so each gateway port is its own
+# destination.
+#
+# No `authentication` here: the agents already carry agentgateway's virtual
+# key, never a provider key, so there is nothing for egress to swap in.
+apiVersion: api.kagent.dev/v1alpha3
+kind: EgressPolicy
+metadata:
+  name: imagine-agents
+  namespace: default
+spec:
+  destinations:
+  - origin: http://agentgateway.default.svc.cluster.local:3000   # LLM
+  - origin: http://mcp-gateway.mcp.svc.cluster.local:3001        # MCP (its own gateway)
+  - origin: http://agentgateway.default.svc.cluster.local:3002   # Scout
+  - origin: http://agentgateway.default.svc.cluster.local:3003   # DP
+  # Traces: Substrate's OTel collector (the Director's spans, OTLP/HTTP).
+  - origin: http://opentelemetry-collector.otel-system.svc.cluster.local:4318

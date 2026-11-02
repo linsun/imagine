@@ -1,0 +1,71 @@
+# :3004 -- GitHub, for publish-mcp. It sends the agents' virtual key; the
+# gateway checks it, swaps in the real GITHUB_TOKEN (from `provider-keys`) and
+# forwards over TLS. publish-mcp never holds the token.
+#
+#   /api/...      -> https://api.github.com/...
+#   /uploads/...  -> https://uploads.github.com/...
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata:
+  name: github-api
+  namespace: default
+spec:
+  static: {host: api.github.com, port: 443}
+  policies:
+    tls: {}
+    auth:
+      secretRef: {name: provider-keys, key: GITHUB_TOKEN}
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata:
+  name: github-uploads
+  namespace: default
+spec:
+  static: {host: uploads.github.com, port: 443}
+  policies:
+    tls: {}
+    auth:
+      secretRef: {name: provider-keys, key: GITHUB_TOKEN}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: github
+  namespace: default
+spec:
+  parentRefs:
+  - {name: agentgateway, sectionName: github}
+  rules:
+  - matches:
+    - path: {type: PathPrefix, value: /api}
+    filters:
+    - type: URLRewrite
+      urlRewrite:
+        path: {type: ReplacePrefixMatch, replacePrefixMatch: /}
+    backendRefs:
+    - {group: agentgateway.dev, kind: AgentgatewayBackend, name: github-api}
+  - matches:
+    - path: {type: PathPrefix, value: /uploads}
+    filters:
+    - type: URLRewrite
+      urlRewrite:
+        path: {type: ReplacePrefixMatch, replacePrefixMatch: /}
+    backendRefs:
+    - {group: agentgateway.dev, kind: AgentgatewayBackend, name: github-uploads}
+---
+# Same virtual key as the LLMs, under the name `publish` (Secret
+# `agw-publish-key`, created by scripts/k8s-up.sh).
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: github-access
+  namespace: default
+spec:
+  targetRefs:
+  - {group: gateway.networking.k8s.io, kind: HTTPRoute, name: github}
+  traffic:
+    apiKeyAuthentication:
+      mode: Strict
+      secretRef: {name: agw-publish-key}

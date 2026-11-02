@@ -1,0 +1,23 @@
+# :3000 -- who may use the models. Was `llm.policies.apiKey` and `.cors`.
+#
+# The agents (and vision-mcp) send AGW_VIRTUAL_KEY as a Bearer token. The
+# Secret `agw-virtual-key` holds only its sha256 hash, plus metadata
+# `name: director`, which token-limit.yaml uses to pick the bucket
+# (`apiKey.name`). scripts/k8s-up.sh creates it from .env.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: llm-access
+  namespace: default
+spec:
+  targetRefs:
+  - {group: gateway.networking.k8s.io, kind: Gateway, name: agentgateway, sectionName: llm}
+  traffic:
+    apiKeyAuthentication:
+      mode: Strict
+      secretRef: {name: agw-virtual-key}
+    # For the agentgateway UI (port-forwarded to localhost:15000).
+    cors:
+      allowOrigins: ["http://localhost:15000"]
+      allowHeaders: ["*"]
+      allowMethods: [GET, POST]

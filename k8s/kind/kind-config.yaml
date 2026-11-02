@@ -1,0 +1,46 @@
+# kind cluster for Agent Substrate (github.com/linsun/substrate), gVisor only.
+#
+# Everything hack/create-kind-cluster.sh does, written out. There are two
+# exceptions, which a kind config cannot express:
+#   - the registry container itself (a one-time `docker run`, see README.md)
+#   - the proxy_arp/proxy_ndp sysctls (node-prep.yaml, a DaemonSet, so they
+#     are set again after every Docker or laptop restart)
+#
+#   kind create cluster --name kind --config k8s/kind/kind-config.yaml
+#
+# No /dev/kvm mount: Docker Desktop on macOS has no KVM, so micro-VM
+# WorkerPools are unavailable. gVisor is unaffected.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+
+nodes:
+- role: control-plane
+  extraMounts:
+  # Registry routing for containerd: localhost:5001/* -> kind-registry:5000.
+  # kind node images read /etc/containerd/certs.d (config_path), so mounting
+  # the directory does what the script's `docker exec ... cp hosts.toml` did.
+  # kind needs an absolute hostPath; /Users is shared with Docker Desktop by default.
+  - hostPath: /Users/linsun/src/github.com/linsun/imagine/k8s/kind/certs.d
+    containerPath: /etc/containerd/certs.d
+    readOnly: true
+
+# Substrate's podcertificate controller issues workload certificates through
+# ClusterTrustBundle and PodCertificateRequest. They are not all on by default.
+featureGates:
+  ClusterTrustBundle: true
+  ClusterTrustBundleProjection: true
+  PodCertificateRequest: true
+runtimeConfig:
+  "certificates.k8s.io/v1beta1": "true"
+
+networking:
+  ipFamily: ipv4
+
+# The substrate install pulls ~570MB of images onto this one node. By default
+# kubelet pulls one image at a time, so the last workload in the queue can
+# miss its readiness deadline.
+kubeadmConfigPatches:
+- |
+  kind: KubeletConfiguration
+  serializeImagePulls: false
+  maxParallelImagePulls: 4

@@ -1,0 +1,77 @@
+# :3002 Scout, :3003 DP, :3007/director/ Director -- the agents, which are kagent Agents
+# (../kagent/), not Services.
+#
+# kagent names each actor after its session, so there is no fixed
+# `ate-target-actor` to set. Instead every request goes to kagent's A2A
+# endpoint for the Agent, /agents/<namespace>/<name>/ on the controller.
+# kagent finds or starts the session's actor, dials it over gRPC through
+# atenet-router, and stores the task. The traffic is A2A v1 JSON-RPC.
+---
+# Lets the routes in `default` send traffic to kagent's controller Service.
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: imagine-routes
+  namespace: kagent
+spec:
+  from:
+  - {group: gateway.networking.k8s.io, kind: HTTPRoute, namespace: default}
+  to:
+  - {group: "", kind: Service, name: kagent-controller}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: scout
+  namespace: default
+spec:
+  parentRefs:
+  - {name: agentgateway, sectionName: scout}
+  rules:
+  - matches: [{path: {type: PathPrefix, value: /}}]
+    filters:
+    - type: URLRewrite
+      urlRewrite:
+        path: {type: ReplacePrefixMatch, replacePrefixMatch: /agents/default/scout/}
+    backendRefs:
+    - {kind: Service, name: kagent-controller, namespace: kagent, port: 8083}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: dp
+  namespace: default
+spec:
+  parentRefs:
+  - {name: agentgateway, sectionName: dp}
+  rules:
+  - matches: [{path: {type: PathPrefix, value: /}}]
+    filters:
+    - type: URLRewrite
+      urlRewrite:
+        path: {type: ReplacePrefixMatch, replacePrefixMatch: /agents/default/dp/}
+    backendRefs:
+    - {kind: Service, name: kagent-controller, namespace: kagent, port: 8083}
+---
+# The Director: :3007/director/, on the studio's port. The page calls it here
+# (same origin, so the browser needs no CORS; see ../studio/routes.yaml), and
+# so does ./imagine k8s demo. A film turn takes about 2 minutes; the timeout
+# leaves plenty of room.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: studio-director
+  namespace: default
+spec:
+  parentRefs:
+  - {name: agentgateway, sectionName: studio}
+  rules:
+  - matches: [{path: {type: PathPrefix, value: /director/}}]
+    filters:
+    - type: URLRewrite
+      urlRewrite:
+        path: {type: ReplacePrefixMatch, replacePrefixMatch: /agents/default/director/}
+    backendRefs:
+    - {kind: Service, name: kagent-controller, namespace: kagent, port: 8083}
+    timeouts:
+      request: 900s

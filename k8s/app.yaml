@@ -1,0 +1,49 @@
+# The always-on part of the demo in `default`: the viewfinder (photo inbox +
+# stage page). agentgateway is in gateway-api/, the MCP servers and their
+# gateway in mcp/. The agents -- Director, Scout, DP -- are NOT here: they are
+# kagent Agents (kagent/), Substrate actors that run only while they are being
+# asked something.
+---
+# ---------------------------------------------------------------- viewfinder
+# The photo inbox (phone uploads land here), the live-camera page, and the
+# /stage page you put on the projector. A PVC, so the latest photo survives a
+# pod restart mid-show.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: inbox, namespace: default}
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: {requests: {storage: 1Gi}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: viewfinder, namespace: default}
+spec:
+  selector: {app: viewfinder}
+  ports: [{name: http, port: 8888}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: viewfinder, namespace: default}
+spec:
+  strategy: {type: Recreate}
+  selector: {matchLabels: {app: viewfinder}}
+  template:
+    metadata: {labels: {app: viewfinder}}
+    spec:
+      containers:
+      - name: viewfinder
+        image: localhost:5001/imagine-keynote:dev
+        imagePullPolicy: Always
+        command: ["python", "-m", "servers.viewfinder"]
+        env:
+        - {name: VIEWFINDER_HOST, value: "0.0.0.0"}
+        - {name: PREVIEW_PORT, value: "8888"}
+        ports: [{containerPort: 8888}]
+        volumeMounts: [{name: inbox, mountPath: /data/inbox}]
+        readinessProbe:
+          httpGet: {path: /healthz, port: 8888}
+          periodSeconds: 3
+      volumes:
+      - name: inbox
+        persistentVolumeClaim: {claimName: inbox}

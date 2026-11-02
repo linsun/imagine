@@ -1,0 +1,106 @@
+# agentgateway IN THE CLUSTER, programmed through the Gateway API: the same
+# policies as the laptop's ../../gateway/config.yaml, written as
+# Gateway, HTTPRoute and agentgateway's own resources. The agentgateway
+# controller turns them into the proxy's config and pushes changes live:
+# edit a resource, `kubectl apply`, and the next request sees it. No restart,
+# no ConfigMap.
+#
+# Needs Gateway API v1.6 + agentgateway v1.6.0 (scripts/k8s-install-agentgateway.sh).
+#
+# The Gateway is named `agentgateway`, so the controller creates a Deployment
+# and Service named `agentgateway` in `default`. The MCP servers have their own
+# gateway in `mcp` (../mcp/gateway.yaml).
+#
+#   gateway.yaml       this file: the Gateway, its proxy settings, tracing
+#   models.yaml        :3000 the LLMs (Gemini, OpenAI fallback, image model)
+#   llm-policy.yaml    :3000 who may call the LLMs (the agents' virtual key)
+#   token-limit.yaml   :3000 how many tokens they get -- the demo knob
+#   agents.yaml        :3002 Scout, :3003 DP, :3007/director/ (kagent Agents)
+#   github.yaml        :3004 GitHub, with the real token swapped in
+#   photos.yaml        :3005 the photo inbox for the phone
+#   ../studio/routes.yaml  :3007 the studio page (applied with the studio actor)
+---
+# How the controller should run this Gateway's proxy.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayParameters
+metadata:
+  name: imagine-gateway
+  namespace: default
+spec:
+  env:
+  # Service name in traces. Substrate's router is also agentgateway (and
+  # reports as "agentgateway"); this keeps the two apart in Jaeger.
+  - {name: OTEL_SERVICE_NAME, value: imagine-gateway}
+  # The price catalog for the cost numbers in the UI. Was `modelCatalog:` in the
+  # config file; now the ConfigMap that scripts/k8s-up.sh builds from
+  # gateway/base-costs.json. The UI's "refresh costs" can't rewrite it here; to
+  # change prices, update gateway/base-costs.json and re-run k8s-up.
+  modelCatalog:
+    sources:
+    - configMap: {name: gateway-costs, key: base-costs.json}
+  # What the typed resources can't say yet: the request log the UI reads.
+  # /tmp is the proxy pod's writable emptyDir (the root filesystem is
+  # read-only), so the log starts empty when the pod restarts.
+  rawConfig:
+    config:
+      database:
+        url: sqlite:///tmp/data.db?mode=rwc
+    frontendPolicies:
+      accessLog:
+        database:
+          llm: full
+  # In kind nothing hands out LoadBalancer IPs. Everything reaches the gateway
+  # in-cluster or through kubectl port-forward, so a ClusterIP is enough.
+  service:
+    spec:
+      type: ClusterIP
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: agentgateway
+  namespace: default
+spec:
+  gatewayClassName: agentgateway
+  infrastructure:
+    parametersRef:
+      group: agentgateway.dev
+      kind: AgentgatewayParameters
+      name: imagine-gateway
+  listeners:
+  # LLMs: the OpenAI and Gemini APIs. Models attach straight to the listener
+  # (models.yaml), no HTTPRoute.
+  - name: llm
+    port: 3000
+    protocol: HTTP
+    allowedRoutes:
+      namespaces: {from: Same}
+      kinds:
+      - {group: agentgateway.dev, kind: AgentgatewayModel}
+  - {name: scout, port: 3002, protocol: HTTP, allowedRoutes: {namespaces: {from: Same}}}
+  - {name: dp, port: 3003, protocol: HTTP, allowedRoutes: {namespaces: {from: Same}}}
+  - {name: github, port: 3004, protocol: HTTP, allowedRoutes: {namespaces: {from: Same}}}
+  - {name: photos, port: 3005, protocol: HTTP, allowedRoutes: {namespaces: {from: Same}}}
+  # The studio page (k8s/studio/), a Substrate actor that sleeps until opened,
+  # and the Director at /director/ (agents.yaml).
+  - {name: studio, port: 3007, protocol: HTTP, allowedRoutes: {namespaces: {from: Same}}}
+---
+# Gateway-wide: tracing and the body buffer.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: gateway-frontend
+  namespace: default
+spec:
+  targetRefs:
+  - {group: gateway.networking.k8s.io, kind: Gateway, name: agentgateway}
+  frontend:
+    # Photos and generated images go through as request bodies (32 MiB).
+    http:
+      maxBufferSize: 32Mi
+    # Substrate's collector (otel-system) -> its Jaeger: the demo's traces sit
+    # next to the platform's own (actor resume, restore, snapshot).
+    tracing:
+      url: http://opentelemetry-collector.otel-system.svc.cluster.local:4317
+      protocol: GRPC
+      randomSampling: "true"

@@ -1,0 +1,137 @@
+# The MCP gateway, in `mcp`: a second agentgateway, only for tools. :3001 is
+# one MCP endpoint (/mcp) in front of the five MCP servers (servers.yaml),
+# plus "publish needs a signed-in user". The main gateway (../gateway-api/)
+# keeps the LLMs, the agents, GitHub and the photo inbox.
+#
+# The Gateway is named `mcp-gateway`, so the controller creates a Deployment
+# and Service named `mcp-gateway` here. The agents call
+# http://mcp-gateway.mcp.svc.cluster.local:3001/mcp (../kagent/harnesses.yaml).
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayParameters
+metadata:
+  name: mcp-gateway
+  namespace: mcp
+spec:
+  env:
+  # Service name in traces, apart from the main gateway's `imagine-gateway`.
+  - {name: OTEL_SERVICE_NAME, value: mcp-gateway}
+  service:
+    spec:
+      type: ClusterIP
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: mcp-gateway
+  namespace: mcp
+spec:
+  gatewayClassName: agentgateway
+  infrastructure:
+    parametersRef:
+      group: agentgateway.dev
+      kind: AgentgatewayParameters
+      name: mcp-gateway
+  listeners:
+  - {name: mcp, port: 3001, protocol: HTTP, allowedRoutes: {namespaces: {from: Same}}}
+---
+# Gateway-wide: tracing and the body buffer, as on the main gateway.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: mcp-gateway-frontend
+  namespace: mcp
+spec:
+  targetRefs:
+  - {group: gateway.networking.k8s.io, kind: Gateway, name: mcp-gateway}
+  frontend:
+    # Photos and generated images go through as tool arguments and results.
+    http:
+      maxBufferSize: 32Mi
+    tracing:
+      url: http://opentelemetry-collector.otel-system.svc.cluster.local:4317
+      protocol: GRPC
+      randomSampling: "true"
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata:
+  name: imagine-mcp
+  namespace: mcp
+spec:
+  mcp:
+    # One server down must not take the others' tools with it.
+    failureMode: FailOpen
+    targets:
+    - {name: camera,  static: {host: camera-mcp,  port: 8000, path: /mcp, protocol: StreamableHTTP}}
+    - {name: stage,   static: {host: stage-mcp,   port: 8000, path: /mcp, protocol: StreamableHTTP}}
+    - {name: post,    static: {host: post-mcp,    port: 8000, path: /mcp, protocol: StreamableHTTP}}
+    - {name: publish, static: {host: publish-mcp, port: 8000, path: /mcp, protocol: StreamableHTTP}}
+    - {name: vision,  static: {host: vision-mcp,  port: 8000, path: /mcp, protocol: StreamableHTTP}}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: mcp
+  namespace: mcp
+spec:
+  parentRefs:
+  - {name: mcp-gateway, sectionName: mcp}
+  rules:
+  - matches:
+    - path: {type: PathPrefix, value: /mcp}
+    backendRefs:
+    - {group: agentgateway.dev, kind: AgentgatewayBackend, name: imagine-mcp}
+---
+# Publishing needs a signed-in person, as on the laptop. Sign-in is optional
+# for the other tools, so a token is checked only when one is sent. Then the
+# `publish` tools are hidden and refused without a user (jwt.sub).
+#
+# The token's issuer is the address the browser signs in at (localhost:8080, a
+# port-forward to Keycloak, which keycloak.yaml pins with KC_HOSTNAME). The
+# signing keys are fetched in-cluster from the keycloak Service next to this
+# gateway; scripts/k8s-up.sh starts Keycloak first.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: mcp-publish-auth
+  namespace: mcp
+spec:
+  targetRefs:
+  - {group: agentgateway.dev, kind: AgentgatewayBackend, name: imagine-mcp}
+  backend:
+    mcp:
+      authentication:
+        mode: Optional
+        provider: Keycloak
+        issuer: http://localhost:8080/realms/my-realm
+        audiences: [publish-mcp-server]
+        jwks:
+          backendRef: {name: keycloak, kind: Service, port: 8080}
+          jwksPath: /realms/my-realm/protocol/openid-connect/certs
+        resourceMetadata:
+          resource: http://localhost:3001/mcp
+          scopesSupported: [openid]
+          bearerMethodsSupported: [header]
+      authorization:
+        action: Deny
+        policy:
+          matchExpressions:
+          - mcp.tool.target == "publish" && !has(jwt.sub)
+---
+# For the agentgateway UIs (port-forwarded: the main gateway's to
+# localhost:15000, this one's to localhost:15001).
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: mcp-cors
+  namespace: mcp
+spec:
+  targetRefs:
+  - {group: gateway.networking.k8s.io, kind: HTTPRoute, name: mcp}
+  traffic:
+    cors:
+      allowOrigins: ["http://localhost:15000", "http://localhost:15001"]
+      allowHeaders: ["*"]
+      allowMethods: [GET, POST]
+      exposeHeaders: [Mcp-Session-Id]

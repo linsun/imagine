@@ -1,0 +1,4 @@
+# Pulls of localhost:5001/<image> from inside the kind node go to the
+# kind-registry container on the kind Docker network. Inside the node,
+# "localhost" is the node itself, not your Mac.
+[host."http://kind-registry:5000"]

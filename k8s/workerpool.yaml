@@ -1,0 +1,41 @@
+# The one pool of Substrate workers. Every actor runs here: kagent's Director,
+# Scout and DP session actors, and the studio page (a raw actor).
+#
+# 2 workers, so several actors share a worker:
+#   kubectl ate get workers    # the ACTORS column, e.g. 2/1000
+# Substrate places an actor on the less loaded of two workers it samples, and
+# books the actor's limits against the worker's: kagent's actors take 1 CPU /
+# 1Gi each, the studio 500m / 256Mi. Two 2 CPU / 2Gi workers hold Director,
+# Scout, DP and the studio at once (3.5 CPU / 3.25Gi). A stale session actor
+# left RUNNING takes room too; suspend it with
+#   kubectl ate suspend actor <session-...> -a default
+#
+# The two kagent.dev labels are the workerSelector kagent writes into every
+# ActorTemplate it makes; the studio's template (studio/studio.yaml) selects
+# the same label. A Harness can only reference a pool in its own namespace, so
+# this pool and the Harnesses both live in `default`.
+#
+# ${WORKER_IMAGE} is filled in by scripts/k8s-up.sh (ateworker-gvisor, at the
+# cluster's Substrate version).
+apiVersion: ate.dev/v1alpha1
+kind: WorkerPool
+metadata:
+  name: imagine
+  namespace: default
+  labels:
+    kagent.dev/worker-pool-name: imagine
+    kagent.dev/worker-pool-namespace: default
+spec:
+  replicas: 2
+  workerImage: ${WORKER_IMAGE}
+  sandboxClasses:
+  - name: gvisor
+    configRef: {name: gvisor-default}
+  template:
+    labels:
+      kagent.dev/worker-pool-name: imagine
+      kagent.dev/worker-pool-namespace: default
+    # The limits are the worker's capacity: what its actors may book.
+    resources:
+      limits:   {cpu: "2", memory: 2Gi}
+      requests: {cpu: 250m, memory: 2Gi}

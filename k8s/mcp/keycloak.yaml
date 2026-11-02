@@ -1,0 +1,51 @@
+# Keycloak for the publish sign-in, in `mcp` beside the MCP gateway that checks
+# its tokens -- the same image, command and realm seed as
+# the laptop version (README: `docker run ... keycloak:26.4.1 start-dev
+# --import-realm`). The realm files come from ../keycloak-seed/ (git-ignored: it
+# holds a user's password hash), loaded into the Secret `keycloak-seed` by
+# scripts/k8s-up.sh.
+#
+# KC_HOSTNAME pins the token issuer to http://localhost:8080 -- the address your
+# browser uses (a port-forward) -- so tokens carry the same `iss` no matter how
+# Keycloak is reached. The MCP gateway validates that issuer, and fetches the
+# signing keys in-cluster from keycloak.mcp.svc (gateway.yaml: jwks).
+#
+# start-dev keeps its data in the container: a restart re-imports the seed, so
+# the realm is always exactly what is in keycloak-seed/.
+apiVersion: v1
+kind: Service
+metadata: {name: keycloak, namespace: mcp}
+spec:
+  selector: {app: keycloak}
+  ports: [{name: http, port: 8080}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: keycloak, namespace: mcp}
+spec:
+  selector: {matchLabels: {app: keycloak}}
+  template:
+    metadata: {labels: {app: keycloak}}
+    spec:
+      containers:
+      - name: keycloak
+        image: quay.io/keycloak/keycloak:26.4.1
+        args: ["start-dev", "--import-realm"]
+        env:
+        - {name: KC_BOOTSTRAP_ADMIN_USERNAME, value: admin}
+        - {name: KC_BOOTSTRAP_ADMIN_PASSWORD, value: admin}
+        - {name: KC_HOSTNAME, value: "http://localhost:8080"}
+        - {name: KC_HOSTNAME_BACKCHANNEL_DYNAMIC, value: "true"}
+        - {name: KC_HEALTH_ENABLED, value: "true"}
+        ports: [{containerPort: 8080}, {containerPort: 9000}]
+        volumeMounts:
+        - {name: seed, mountPath: /opt/keycloak/data/import, readOnly: true}
+        readinessProbe:
+          httpGet: {path: /health/ready, port: 9000}
+          periodSeconds: 5
+          failureThreshold: 60
+        resources:
+          requests: {cpu: 250m, memory: 768Mi}
+      volumes:
+      - name: seed
+        secret: {secretName: keycloak-seed}

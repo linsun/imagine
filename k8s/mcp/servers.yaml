@@ -1,0 +1,151 @@
+# The MCP servers, in their own namespace `mcp`. The agents reach them only
+# through the MCP gateway (gateway.yaml, :3001); each server speaks
+# streamable HTTP on :8000/mcp. They were stdio children of agentgateway on
+# the laptop.
+#
+# What they call back into `default`: the viewfinder (camera, stage) and the
+# main agentgateway -- :3000 for the image model (vision), :3004 for GitHub
+# (publish) -- so the provider keys and GITHUB_TOKEN stay with that gateway.
+# vision-mcp is the one exception: Veo goes direct, so it gets `provider-keys`.
+#
+# Settings: the ConfigMap `imagine-env` (and the Secret `provider-keys`) are
+# copied into this namespace by scripts/k8s-env.sh and scripts/k8s-up.sh.
+---
+apiVersion: v1
+kind: Service
+metadata: {name: camera-mcp, namespace: mcp}
+spec:
+  selector: {app: camera-mcp}
+  ports: [{name: mcp, port: 8000}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: camera-mcp, namespace: mcp}
+spec:
+  selector: {matchLabels: {app: camera-mcp}}
+  template:
+    metadata: {labels: {app: camera-mcp}}
+    spec:
+      containers:
+      - name: camera-mcp
+        image: localhost:5001/imagine-keynote:dev
+        imagePullPolicy: Always
+        command: ["python", "-m", "servers.camera_mcp"]
+        envFrom: [{configMapRef: {name: imagine-env}}]
+        env:
+        - {name: MCP_TRANSPORT, value: http}
+        - {name: VIEWFINDER_URL, value: "http://viewfinder.default.svc.cluster.local:8888"}
+        # what YOUR browser uses (kubectl port-forward), not the pod
+        - {name: PUBLIC_VIEWFINDER_URL, value: "http://localhost:8888"}
+        ports: [{containerPort: 8000}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: stage-mcp, namespace: mcp}
+spec:
+  selector: {app: stage-mcp}
+  ports: [{name: mcp, port: 8000}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: stage-mcp, namespace: mcp}
+spec:
+  selector: {matchLabels: {app: stage-mcp}}
+  template:
+    metadata: {labels: {app: stage-mcp}}
+    spec:
+      containers:
+      - name: stage-mcp
+        image: localhost:5001/imagine-keynote:dev
+        imagePullPolicy: Always
+        command: ["python", "-m", "servers.stage_mcp"]
+        envFrom: [{configMapRef: {name: imagine-env}}]
+        env:
+        - {name: MCP_TRANSPORT, value: http}
+        - {name: STAGE_URL, value: "http://viewfinder.default.svc.cluster.local:8888"}
+        ports: [{containerPort: 8000}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: post-mcp, namespace: mcp}
+spec:
+  selector: {app: post-mcp}
+  ports: [{name: mcp, port: 8000}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: post-mcp, namespace: mcp}
+spec:
+  selector: {matchLabels: {app: post-mcp}}
+  template:
+    metadata: {labels: {app: post-mcp}}
+    spec:
+      containers:
+      - name: post-mcp
+        image: localhost:5001/imagine-keynote:dev
+        imagePullPolicy: Always
+        command: ["python", "-m", "servers.post_mcp"]
+        envFrom: [{configMapRef: {name: imagine-env}}]
+        env:
+        - {name: MCP_TRANSPORT, value: http}
+        ports: [{containerPort: 8000}]
+        resources:
+          requests: {cpu: 500m, memory: 512Mi}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: publish-mcp, namespace: mcp}
+spec:
+  selector: {app: publish-mcp}
+  ports: [{name: mcp, port: 8000}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: publish-mcp, namespace: mcp}
+spec:
+  selector: {matchLabels: {app: publish-mcp}}
+  template:
+    metadata: {labels: {app: publish-mcp}}
+    spec:
+      containers:
+      - name: publish-mcp
+        image: localhost:5001/imagine-keynote:dev
+        imagePullPolicy: Always
+        command: ["python", "-m", "servers.publish_mcp"]
+        envFrom: [{configMapRef: {name: imagine-env}}]
+        env:
+        - {name: MCP_TRANSPORT, value: http}
+        # GitHub via the gateway, which swaps the virtual key for the token.
+        - {name: GITHUB_API, value: "http://agentgateway.default.svc.cluster.local:3004/api"}
+        - {name: GITHUB_UPLOADS, value: "http://agentgateway.default.svc.cluster.local:3004/uploads"}
+        ports: [{containerPort: 8000}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: vision-mcp, namespace: mcp}
+spec:
+  selector: {app: vision-mcp}
+  ports: [{name: mcp, port: 8000}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: vision-mcp, namespace: mcp}
+spec:
+  selector: {matchLabels: {app: vision-mcp}}
+  template:
+    metadata: {labels: {app: vision-mcp}}
+    spec:
+      containers:
+      - name: vision-mcp
+        image: localhost:5001/imagine-vision:dev
+        imagePullPolicy: Always
+        envFrom:
+        - configMapRef: {name: imagine-env}
+        # The ONE non-gateway holder of GEMINI_API_KEY: Veo goes direct.
+        - secretRef: {name: provider-keys}
+        env:
+        - {name: GEMINI_BASE_URL, value: "http://agentgateway.default.svc.cluster.local:3000"}
+        - {name: MCP_PORT, value: "8000"}
+        - {name: OPENAI_API_KEY, value: ""}
+        - {name: GITHUB_TOKEN, value: ""}
+        ports: [{containerPort: 8000}]

@@ -1,0 +1,40 @@
+# The studio page, as a raw Substrate actor template (protojson ActorTemplate,
+# applied with `kubectl ate create actor-template -f`), outside kagent on
+# purpose: kagent starts one actor per A2A session, and a web page is not an
+# A2A agent. This is one actor, `default/studio`, that atenet-router wakes
+# whenever a browser opens :3007.
+#
+# Raw Substrate does not suspend idle actors (kagent does that for its own),
+# so it sleeps when you say so:  ./imagine k8s studio sleep
+metadata:
+  atespace: default
+  name: studio
+# The one pool (../workerpool.yaml), next to kagent's actors.
+workerSelector:
+  matchLabels: {kagent.dev/worker-pool-name: imagine}
+containers:
+- name: studio
+  # imagine-agents (Dockerfile.agents): Alpine, so no pointer-authentication
+  # code and the process survives a MEMORY snapshot on arm64.
+  image: ${IMAGE}
+  command: [python, -m, agent.studio]
+  env:
+  # Substrate runs the command as given: the image's WORKDIR is not applied.
+  - {name: PYTHONPATH, value: /app}
+  - {name: PYTHONUNBUFFERED, value: "1"}
+  # Set by scripts/k8s-up.sh, so a changed template is detected and replaced.
+  - {name: TEMPLATE_HASH, value: "${TEMPLATE_HASH}"}
+  # atenet-router delivers to port 80.
+  - {name: PORT, value: "80"}
+  wakeupProbe:
+    httpGet: {path: /healthz, port: 80}
+# Substrate v0.6: a list of {name, quantity}, as in Kubernetes quantities.
+resources:
+  limits:
+  - {name: cpu, quantity: 500m}
+  - {name: memory, quantity: 256Mi}
+# MEMORY fidelity: a resume continues the same process, so the server sees the
+# gap in its own clock and the page can say how long it slept.
+snapshotConfig:
+  storageLocation: gs://ate-snapshots/imagine/
+  preferredFidelity: SNAPSHOT_FIDELITY_MEMORY

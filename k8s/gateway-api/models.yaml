@@ -1,0 +1,100 @@
+# :3000 -- the models. Was `llm.models` and `llm.virtualModels` in the config
+# file. Each AgentgatewayModel attaches to the Gateway's `llm` listener.
+#
+# Clients ask for a model by name (`match.model`); that is also the model name
+# sent upstream. Internal models can only be reached through a virtual model.
+#
+# Provider keys come from the `provider-keys` Secret (scripts/k8s-up.sh), read
+# by the gateway only -- the agents never hold one.
+---
+# The Director's brain, primary: Gemini.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayModel
+metadata:
+  name: director-primary
+  namespace: default
+spec:
+  parentRefs:
+  - {name: agentgateway, sectionName: llm}
+  match: {model: gemini-3.6-flash}
+  visibility: Internal
+  provider: Gemini
+  policies:
+    # Send the key as x-goog-api-key. Google's newer API keys ("AQ." prefix)
+    # are rejected as a Bearer token on the native API ("Expected OAuth 2
+    # access token").
+    auth:
+      secretRef: {name: provider-keys, key: GEMINI_API_KEY}
+      location:
+        header: {name: x-goog-api-key}
+    health:
+      eviction:
+        consecutiveFailures: 2
+        duration: 30s
+---
+# ...and its fallback: OpenAI.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayModel
+metadata:
+  name: director-fallback
+  namespace: default
+spec:
+  parentRefs:
+  - {name: agentgateway, sectionName: llm}
+  match: {model: gpt-4o}
+  visibility: Internal
+  provider: OpenAI
+  policies:
+    auth:
+      secretRef: {name: provider-keys, key: OPENAI_API_KEY}
+    health:
+      eviction:
+        consecutiveFailures: 2
+        duration: 30s
+---
+# What the agents ask for: "director". Gemini first; OpenAI only when Gemini
+# has been evicted (2 failures in a row, for 30s).
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayModel
+metadata:
+  name: director
+  namespace: default
+spec:
+  parentRefs:
+  - {name: agentgateway, sectionName: llm}
+  virtualModel:
+    failover:
+      targets:
+      - {modelRef: {name: director-primary}, priority: 0}
+      - {modelRef: {name: director-fallback}, priority: 1}
+---
+# The image model vision-mcp paints with, under its own name...
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayModel
+metadata:
+  name: gemini-2-5-flash-image
+  namespace: default
+spec:
+  parentRefs:
+  - {name: agentgateway, sectionName: llm}
+  match: {model: gemini-2.5-flash-image}
+  provider: Gemini
+  policies:
+    auth:
+      secretRef: {name: provider-keys, key: GEMINI_API_KEY}
+      location:
+        header: {name: x-goog-api-key}
+---
+# ...and as "nano-banana".
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayModel
+metadata:
+  name: nano-banana
+  namespace: default
+spec:
+  parentRefs:
+  - {name: agentgateway, sectionName: llm}
+  virtualModel:
+    weighted:
+      targets:
+      - modelRef: {name: gemini-2-5-flash-image}

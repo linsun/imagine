@@ -1,0 +1,53 @@
+# :3007, the studio. One origin for the whole page, so the browser needs no
+# CORS and the actor needs no egress:
+#
+#   /            the page          -> atenet-router, which wakes default/studio
+#   /photo/...   the photo inbox   -> viewfinder (/latest, /latest.jpg, /upload)
+#   /stage/...   the projector     -> viewfinder (/stage/state, /stage/media)
+#   /director/   the Director      -> kagent (in ../gateway-api/agents.yaml)
+#
+# Only port-forwarded to 127.0.0.1 (scripts/k8s-pf.sh), so these routes carry
+# no inbox key: the page is for the laptop on stage, not the venue wifi.
+---
+# Lets the route in `default` send traffic to atenet-router in `ate-system`.
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: imagine-studio
+  namespace: ate-system
+spec:
+  from:
+  - {group: gateway.networking.k8s.io, kind: HTTPRoute, namespace: default}
+  to:
+  - {group: "", kind: Service, name: atenet-router}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: studio
+  namespace: default
+spec:
+  parentRefs:
+  - {name: agentgateway, sectionName: studio}
+  rules:
+  # Plain HTTP to the actor (not the A2A backend the agents use): it's a page.
+  # The first request after a sleep waits for the resume.
+  - filters:
+    - type: RequestHeaderModifier
+      requestHeaderModifier:
+        set:
+        - {name: ate-target-actor, value: default/studio}
+    backendRefs:
+    - {kind: Service, name: atenet-router, namespace: ate-system, port: 80}
+    timeouts:
+      request: 120s
+  - matches: [{path: {type: PathPrefix, value: /photo/}}]
+    filters:
+    - type: URLRewrite
+      urlRewrite:
+        path: {type: ReplacePrefixMatch, replacePrefixMatch: /}
+    backendRefs:
+    - {name: viewfinder, port: 8888}
+  - matches: [{path: {type: PathPrefix, value: /stage/}}]
+    backendRefs:
+    - {name: viewfinder, port: 8888}
