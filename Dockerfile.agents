@@ -1,0 +1,26 @@
+# The image for the studio page (agent/studio.py), a raw Agent Substrate actor
+# (k8s/studio/). The agents on kagent use ./Dockerfile.kagent; the MCP servers
+# and viewfinder use the Debian image in ./Dockerfile, as ordinary pods.
+#
+# Why Alpine: an actor is resumed from a snapshot of its running process. On
+# arm64 with pointer authentication (Apple M-series, and so the kind node on
+# this Mac), code built with branch protection signs return addresses with a
+# per-process key -- and a restored process gets a NEW key, so the first
+# return through a frame signed before the snapshot fails: "Illegal
+# instruction". Debian's libc and libpython are built that way (thousands of
+# PACIASP instructions); Alpine's musl and Python are not (zero). Go binaries
+# are unaffected, which is why substrate's Go demos restore fine.
+# scripts/check-pac.py verifies the image stays PAC-free.
+FROM python:3.12-alpine
+
+ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/app
+
+WORKDIR /app
+COPY agent/requirements.txt agent-requirements.txt
+RUN pip install --no-cache-dir -r agent-requirements.txt
+
+COPY agent ./agent
+COPY scripts/check-pac.py /usr/local/bin/check-pac.py
+
+ENV OUTPUT_DIR=/data/outputs
+CMD ["python", "-m", "agent.a2a_server"]
