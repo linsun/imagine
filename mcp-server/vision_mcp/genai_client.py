@@ -66,11 +66,15 @@ def _virtual_key_headers() -> dict:
 
 def _build(base_url: str) -> genai.Client:
     if base_url:
+        # The in-cluster agentgateway (1.7, Gateway API models) fails to read a
+        # large gzip-compressed Gemini image response (502 "failed to process
+        # LLM response"), so ask for it uncompressed. Only the hop to the
+        # gateway; direct calls to Google keep gzip.
         return genai.Client(
             api_key=_api_key(base_url),
             http_options=types.HttpOptions(
                 base_url=base_url,
-                headers=_virtual_key_headers() or None,
+                headers={**_virtual_key_headers(), "Accept-Encoding": "identity"},
             ),
         )
     return genai.Client(api_key=_api_key())

@@ -6,8 +6,12 @@ cannot bypass the gateway on later turns, and log a2a.method.
 
   python -m agent.crew scout   # :9101
   python -m agent.crew dp      # :9102
+
+On kagent the same two roles run under agent/kagent_runtime.py instead
+(A2A v1 over gRPC); both use answer() below.
 """
 
+import functools
 import os
 import sys
 
@@ -72,14 +76,31 @@ ROLES = {
 }
 
 
+@functools.cache
+def _client() -> OpenAI:
+    # The gateway holds the provider credential. We send the VIRTUAL key --
+    # an identity the gateway budgets, never a real provider key.
+    return OpenAI(base_url=f"{LLM}/v1",
+                  api_key=os.environ.get("AGW_VIRTUAL_KEY", "agentgateway"),
+                  timeout=120)
+
+
+def answer(role: str, text: str, trace_headers: dict | None = None) -> str:
+    """One crew answer: the role's prompt plus the Director's text, through
+    agentgateway's LLM route. Shared by the A2A 0.3 server below and the kagent
+    runtime (agent/kagent_runtime.py)."""
+    return _client().chat.completions.create(
+        extra_headers=trace_headers or {},
+        model="director",
+        messages=[{"role": "system", "content": ROLES[role][0]},
+                  {"role": "user", "content": text}],
+        temperature=0.9,
+    ).choices[0].message.content
+
+
 def build(role: str) -> FastAPI:
     prompt, port, title = ROLES[role]
     app = FastAPI()
-    # The gateway holds the provider credential. We send the VIRTUAL key --
-    # an identity the gateway budgets, never a real provider key.
-    client = OpenAI(base_url=f"{LLM}/v1",
-                    api_key=os.environ.get("AGW_VIRTUAL_KEY", "agentgateway"),
-                    timeout=120)
 
     card = {
         "name": title,
@@ -116,13 +137,7 @@ def build(role: str) -> FastAPI:
         incoming = {k: v for k, v in request.headers.items()
                     if k.lower() in ("traceparent", "tracestate", "baggage")}
         try:
-            reply = client.chat.completions.create(
-                extra_headers=incoming,
-                model="director",
-                messages=[{"role": "system", "content": prompt},
-                          {"role": "user", "content": text}],
-                temperature=0.9,
-            ).choices[0].message.content
+            reply = answer(role, text, incoming)
         except Exception as exc:  # surface it as JSON-RPC, not an opaque 500
             return {
                 "jsonrpc": "2.0", "id": body.get("id"),

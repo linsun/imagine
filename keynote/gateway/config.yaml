@@ -76,7 +76,7 @@ llm:
     apiKey:
       mode: strict
       keys:
-      - keyHash: sha256:71782121460ab27fcf73cd70de437322aeb5f30f85183688a843b398469bc8e0
+      - keyHash: sha256:06942b58abf8f52b1b68edfc2da2671e4671709156b7dd0048ea72f38880e714
         metadata:
           name: director
         budgets:
@@ -201,7 +201,7 @@ routes:
     apiKey:
       mode: strict
       keys:
-      - keyHash: sha256:71782121460ab27fcf73cd70de437322aeb5f30f85183688a843b398469bc8e0
+      - keyHash: sha256:06942b58abf8f52b1b68edfc2da2671e4671709156b7dd0048ea72f38880e714
         metadata:
           name: publish
     urlRewrite:
@@ -224,7 +224,7 @@ routes:
     apiKey:
       mode: strict
       keys:
-      - keyHash: sha256:71782121460ab27fcf73cd70de437322aeb5f30f85183688a843b398469bc8e0
+      - keyHash: sha256:06942b58abf8f52b1b68edfc2da2671e4671709156b7dd0048ea72f38880e714
         metadata:
           name: publish
     urlRewrite:

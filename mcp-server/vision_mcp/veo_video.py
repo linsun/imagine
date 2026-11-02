@@ -1,8 +1,10 @@
-"""Veo image-to-video generation wrapper.
+"""Image-to-video generation with Gemini Omni Flash.
 
-Veo generation is a long-running operation: we submit the job and poll until it
-completes, then return the resulting MP4 as base64. Uses the fast model by
-default to keep latency to ~1-2 minutes.
+Google retired the Veo models on the Gemini Developer API; the replacement,
+gemini-omni-1.1-flash, is served by the Interactions API
+(POST /v1beta/interactions), not generate_videos. The pinned google-genai SDK
+predates `client.interactions`, so this calls the REST endpoint directly. The
+call is synchronous: one request returns the MP4 as base64.
 """
 
 import base64
@@ -11,41 +13,60 @@ import os
 import shutil
 import subprocess
 import tempfile
-import time
 
-from google.genai import types
+import httpx
 
-from vision_mcp.genai_client import get_video_client
+from vision_mcp.genai_client import _api_key, _virtual_key_headers
 
 logger = logging.getLogger("vision_mcp.veo")
 logging.basicConfig(level=logging.INFO)
 
-DEFAULT_VIDEO_MODEL = os.environ.get("VIDEO_MODEL", "veo-3.1-lite-generate-preview")
-# Shorter clips generate noticeably faster. Veo 3.1 supports 4/6/8 seconds.
+DEFAULT_VIDEO_MODEL = os.environ.get("VIDEO_MODEL", "gemini-omni-1.1-flash")
+# Omni has no duration parameter (it picks 3-10s), so this is a prompt hint.
 VIDEO_DURATION_SECONDS = int(os.environ.get("VIDEO_DURATION", "6"))
-# Hard cap on how long we wait before giving up (seconds).
+# Hard cap on how long one generation request may take (seconds).
 MAX_WAIT_SECONDS = int(os.environ.get("VIDEO_MAX_WAIT", "900"))
-POLL_INTERVAL_SECONDS = int(os.environ.get("VIDEO_POLL_INTERVAL", "10"))
-# How many Veo clips to chain. 1 = a single clip (max 8s). 2 = the first clip is
-# EXTENDED by Veo, which continues from where it ended and keeps the motion and
-# the music running, rather than cutting to an unrelated second shot.
+# "360p", "720p" (default), "1080p" or "4k" -- the last two are upscaled.
+VIDEO_RESOLUTION = os.environ.get("VIDEO_RESOLUTION", "720p")
+# Direct to Google by default; set VEO_BASE_URL to send it via the gateway.
+_API_BASE = "https://generativelanguage.googleapis.com"
+# How many clips to chain. 1 = a single clip. 2 = a second clip seeded from the
+# last frame of the first, cross-faded, so the motion and the music keep
+# running rather than cutting to an unrelated second shot.
 # Each extra clip costs another full generation, so 2 roughly doubles the wait.
 VIDEO_CLIPS = int(os.environ.get("VIDEO_CLIPS", "1"))
 
 
-def _extract_video_bytes(client, operation) -> bytes:
-    generated = (operation.response.generated_videos or [None])[0]
-    if generated is None:
-        raise RuntimeError("Veo returned no video.")
-    video = generated.video
-    data = getattr(video, "video_bytes", None)
-    if not data:
-        # Some responses return a file handle that must be downloaded first.
-        client.files.download(file=video)
-        data = getattr(video, "video_bytes", None)
-    if not data:
-        raise RuntimeError("Could not read video bytes from Veo response.")
-    return data
+def _generate(model: str, image_png: bytes, prompt: str) -> bytes:
+    """One image-to-video Interactions call; returns the MP4 bytes."""
+    base = os.environ.get("VEO_BASE_URL", "").rstrip("/")
+    headers = {"x-goog-api-key": _api_key(base), **(_virtual_key_headers() if base else {})}
+    body = {
+        "model": model,
+        "input": [
+            {"type": "image", "mime_type": "image/png",
+             "data": base64.b64encode(image_png).decode("ascii")},
+            {"type": "text", "text": prompt},
+        ],
+        "generation_config": {"video_config": {"task": "image_to_video"}},
+        "response_format": {"type": "video", "aspect_ratio": "16:9", "resolution": VIDEO_RESOLUTION},
+        # Synchronous unary generation: the fast path per Google's docs.
+        "background": False,
+        "store": False,
+        "stream": False,
+    }
+    r = httpx.post(f"{base or _API_BASE}/v1beta/interactions", json=body,
+                   headers=headers, timeout=MAX_WAIT_SECONDS)
+    if r.status_code >= 400:
+        raise RuntimeError(f"{model} {r.status_code}: {r.text[:500]}")
+    out = r.json()
+    for step in out.get("steps") or []:
+        if step.get("type") != "model_output":
+            continue
+        for item in step.get("content") or []:
+            if item.get("type") == "video" and item.get("data"):
+                return base64.b64decode(item["data"])
+    raise RuntimeError(f"{model} returned no video (status={out.get('status')}).")
 
 
 # Words that signal the user wants background music in the clip.
@@ -155,87 +176,38 @@ def _join(clips: list[bytes], fade: float = 0.4) -> bytes:
         return f.read()
 
 
-def _await(client, operation, label: str):
-    """Poll one Veo job to completion."""
-    waited = 0
-    while not operation.done:
-        if waited >= MAX_WAIT_SECONDS:
-            raise TimeoutError(
-                f"Video generation exceeded {MAX_WAIT_SECONDS}s. Try the fast model "
-                f"or a shorter clip."
-            )
-        time.sleep(POLL_INTERVAL_SECONDS)
-        waited += POLL_INTERVAL_SECONDS
-        operation = client.operations.get(operation)
-        logger.info("Veo %s: %ss elapsed, done=%s", label, waited, operation.done)
-    if getattr(operation, "error", None):
-        raise RuntimeError(f"Veo error on {label}: {operation.error}")
-    return operation
-
-
 def animate_image(image_b64: str, prompt: str = "", model: str | None = None) -> dict:
     """Animate a still image into a short video clip.
 
     Args:
         image_b64: Source image as base64 (no data: prefix).
         prompt: Motion/scene description. Defaults to gentle natural motion.
-        model: Optional Veo model override.
+        model: Optional video model override.
 
     Returns: { video_b64, mime }
     """
-    client = get_video_client()
     raw = base64.b64decode(image_b64)
-    image = types.Image(image_bytes=raw, mime_type="image/png")
 
     motion_prompt = prompt.strip() or "Bring this image to life with gentle, natural motion."
     motion_prompt = _augment_audio(motion_prompt)
-    logger.info("Veo prompt: %s", motion_prompt)
+    motion_prompt += f"\n\nLength: about {VIDEO_DURATION_SECONDS} seconds."
+    logger.info("Video prompt: %s", motion_prompt)
 
     video_model = model or DEFAULT_VIDEO_MODEL
-    logger.info(
-        "Submitting Veo job (model=%s, duration=%ss)...",
-        video_model,
-        VIDEO_DURATION_SECONDS,
-    )
-    operation = client.models.generate_videos(
-        model=video_model,
-        prompt=motion_prompt,
-        image=image,
-        config=types.GenerateVideosConfig(
-            number_of_videos=1,
-            duration_seconds=VIDEO_DURATION_SECONDS,
-            # NOTE: Do NOT set `generate_audio` here. On the Gemini Developer API
-            # (API key) that parameter is rejected ("generate_audio parameter is
-            # not supported in Gemini API"). Veo 3.x generates native audio by
-            # default on this API, so describe the desired sound/music in the prompt.
-        ),
-    )
-
-    operation = _await(client, operation, "clip 1")
+    logger.info("Generating video (model=%s, ~%ss)...", video_model, VIDEO_DURATION_SECONDS)
+    parts = [_generate(video_model, raw, motion_prompt)]
 
     # --- chain more clips, so the film is not mostly credits -----------------
-    # Veo's NATIVE extension (generate_videos(video=...)) is Vertex-only: on the
-    # Gemini Developer API it fails with "video parameter is not supported in
-    # Gemini API", exactly like generate_audio. So we chain manually: seed each
-    # new clip with the LAST FRAME of the previous one, then cross-fade the
-    # joins. Continuity is good because the model starts from where we stopped.
+    # Seed each new clip with the LAST FRAME of the previous one, then
+    # cross-fade the joins. Continuity is good because the model starts from
+    # where we stopped.
     clips = max(1, VIDEO_CLIPS)
-    parts = [_extract_video_bytes(client, operation)]
     for n in range(2, clips + 1):
         logger.info("Generating clip %s of %s (seeded from the last frame)...", n, clips)
         try:
-            seed = types.Image(image_bytes=_last_frame(parts[-1]), mime_type="image/png")
-            nxt = client.models.generate_videos(
-                model=video_model,
-                prompt=_augment_audio(
-                    f"Continue the same scene, unbroken. {motion_prompt}"),
-                image=seed,
-                config=types.GenerateVideosConfig(
-                    number_of_videos=1,
-                    duration_seconds=VIDEO_DURATION_SECONDS,
-                ),
-            )
-            parts.append(_extract_video_bytes(client, _await(client, nxt, f"clip {n}")))
+            parts.append(_generate(
+                video_model, _last_frame(parts[-1]),
+                _augment_audio(f"Continue the same scene, unbroken. {motion_prompt}")))
         except Exception as exc:  # noqa: BLE001
             # Never lose the footage we already have -- on stage a shorter film
             # beats no film.

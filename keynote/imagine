@@ -440,17 +440,33 @@ def cmd_k8s(args) -> int:
         return subprocess.call([os.path.join(scripts, "k8s-down.sh")])
     if args.action == "purge":
         return subprocess.call([os.path.join(scripts, "k8s-down.sh"), "--purge"])
+    ctx = f"kind-{os.environ.get('KIND_CLUSTER', 'kind')}"
+    ate = os.path.expanduser(os.environ.get("ATE_BIN", "kubectl-ate"))
     if args.action == "status":
-        ctx = f"kind-{os.environ.get('KIND_CLUSTER', 'kind')}"
-        subprocess.call(["kubectl", "--context", ctx, "-n", "imagine", "get",
-                         "deploy,workerpool"])
-        ate = os.path.expanduser(os.environ.get(
-            "ATE_BIN", "~/src/github.com/linsun/substrate/bin/kubectl-ate"))
+        subprocess.call(["kubectl", "--context", ctx, "-n", "default", "get",
+                         "deploy,workerpool,agents"])
         print()
-        return subprocess.call([ate, "--context", ctx, "get", "actors", "-a", "imagine"])
-    # demo: the thin client -> agentgateway :3006 -> the Director pod
+        subprocess.call(["kubectl", "--context", ctx, "-n", "mcp", "get", "deploy"])
+        print()
+        subprocess.call([ate, "--context", ctx, "get", "workers"])
+        print()
+        return subprocess.call([ate, "--context", ctx, "get", "actors", "-a", "default"])
+    if args.action == "studio":
+        # The page is a raw Substrate actor: opening it wakes it, and nothing
+        # puts it back to sleep but this (kagent only suspends its own).
+        if args.what == "sleep":
+            return subprocess.call([ate, "--context", ctx, "suspend", "actor", "studio",
+                                    "-a", "default"])
+        if args.what == "status":
+            return subprocess.call([ate, "--context", ctx, "get", "actors", "studio",
+                                    "-a", "default"])
+        return subprocess.call(["open", "http://localhost:3007/"])
+    # demo: the thin client -> agentgateway :3007/director/ (the studio's port,
+    # the same way in as the page) -> kagent -> the Director's actor, A2A v1
     py = VENV_PY if os.path.exists(VENV_PY) else sys.executable
-    return subprocess.call([py, "-m", "agent.client"], cwd=HERE, env=load_env())
+    return subprocess.call([py, "-m", "agent.client"], cwd=HERE,
+                           env={**load_env(), "DIRECTOR_A2A_PROTOCOL": "v1",
+                                "DIRECTOR_A2A": "http://localhost:3007/director"})
 
 
 def main() -> int:
@@ -495,9 +511,11 @@ def main() -> int:
     s = add("camera", cmd_camera, "release or re-take the camera")
     s.add_argument("action", choices=["on", "off"])
 
-    s = add("k8s", cmd_k8s, "the demo on Agent Substrate: up | demo | forward | status | down | purge")
+    s = add("k8s", cmd_k8s, "the demo on Agent Substrate: up | demo | studio | forward | status | down | purge")
     s.add_argument("action", nargs="?", default="demo",
-                   choices=["up", "demo", "forward", "status", "down", "purge"])
+                   choices=["up", "demo", "studio", "forward", "status", "down", "purge"])
+    s.add_argument("what", nargs="?", default="open", choices=["open", "sleep", "status"],
+                   help="for studio: open the page (wakes it), sleep, or status")
 
     s = add("jaeger", cmd_jaeger, "start/stop Jaeger for the trace view")
     s.add_argument("action", nargs="?", default="up", choices=["up", "down"])

@@ -71,7 +71,8 @@ def capture(countdown: int = 0) -> dict:
 
 @mcp.tool
 def latest_photo() -> dict:
-    """The newest photo sent from the phone (or a drone, via the phone).
+    """The newest photo in the photo inbox: sent from the phone, a drone (via
+    the phone) or the laptop.
 
     Use this when the user says "use my latest photo", "the photo I just sent",
     "the drone shot" -- anything taken on another device rather than by the
@@ -86,7 +87,7 @@ def latest_photo() -> dict:
         raise RuntimeError(_DOWN)
     if r.status_code != 200:
         raise RuntimeError(
-            "No photo in the inbox yet. Send one from the phone first "
+            "No photo in the inbox yet. Send one from the phone or the laptop first "
             "(the Shortcut, or the /inbox page).")
     return {"image_b64": base64.b64encode(r.content).decode("ascii"),
             "mime": "image/jpeg", "age_s": info.get("age_s")}

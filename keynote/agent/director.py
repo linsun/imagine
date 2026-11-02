@@ -26,6 +26,7 @@ import re
 import sys
 import threading
 import time
+import uuid
 
 import httpx
 from openai import OpenAI
@@ -38,6 +39,10 @@ A2A = {
     "dp": os.environ.get("DP_A2A", "http://localhost:3003"),
 }
 MODEL = os.environ.get("DIRECTOR_MODEL", "director")
+# How the Director talks to Scout and DP. "0.3": A2A 0.3 JSON-RPC, straight to
+# the crew's own servers (laptop, raw Substrate actors). "v1": A2A v1 JSON-RPC,
+# to kagent's A2A endpoint for each crew Agent (k8s/kagent/).
+CREW_A2A = os.environ.get("CREW_A2A_PROTOCOL", "0.3")
 
 SYSTEM = """You are the Director of a film being made live, on stage, in front
 of the audience who are in it.
@@ -61,9 +66,11 @@ do not retry it with different wording.
    short sentence, and include the URL in case they need it.
 
 **2b. "Use my latest photo", "the photo I just sent", "the drone shot".**
-   camera_latest_photo(). That is the newest photo sent from the phone (a
-   drone shot arrives the same way). It is shown automatically. Say what you
+   camera_latest_photo(). That is the newest photo in the photo inbox, from
+   the phone, a drone or the laptop. It is shown automatically. Say what you
    got in one sentence. Then STOP. Do not start the film.
+   If the SAME message also describes the film ("use my latest photo and
+   make them fly"), call camera_latest_photo() and then go straight on to 3.
 
 **2a. A file path, or "use this photo".**
    camera_load_image(path=<what they said>). Paths like ~/Desktop/room.jpg work.
@@ -151,7 +158,7 @@ STEP = {
     "camera_preview_url":    ("\U0001F4F7", "finding the camera"),
     "camera_capture":        ("\U0001F4F8", "taking the photo"),
     "camera_load_image":     ("\U0001F5BC\uFE0F", "loading the photo"),
-    "camera_latest_photo":   ("\U0001F4F2", "fetching the photo from the phone"),
+    "camera_latest_photo":   ("\U0001F5BC\uFE0F", "using the latest photo"),
     "camera_list_images":    ("\U0001F5C2\uFE0F", "looking for photos"),
     "camera_release":        ("\U0001F4F4", "putting the camera down"),
     "camera_resume":         ("\U0001F4F7", "picking the camera up"),
@@ -292,8 +299,27 @@ class Director:
         # The last credited film, so `publish` can retry without re-rendering.
         self._last_credited: dict = {}
         self._closer = ""
+        # The crew's A2A contextIds (A2A v1 only). With kagent each context is a
+        # session, and so an actor: reusing it keeps one Scout and one DP warm
+        # instead of starting a new actor for every question.
+        self.crew_contexts: dict[str, str] = {}
+
+    # What a cold start needs to pick the conversation back up. kagent's
+    # snapshots keep only the actor's volumes, not its memory, so
+    # agent/kagent_runtime.py saves this to /data after every turn.
+    _STATE = ("messages", "user_idea", "last_photo", "_last_credited", "crew_contexts")
+
+    def state(self) -> dict:
+        return {k: getattr(self, k) for k in self._STATE}
+
+    def restore(self, saved: dict) -> None:
+        for k in self._STATE:
+            if k in saved:
+                setattr(self, k, saved[k])
 
     def _ask(self, who: str, text: str) -> str:
+        if CREW_A2A == "v1":
+            return self._ask_v1(who, text)
         r = httpx.post(
             f"{A2A[who]}/",
             json={"jsonrpc": "2.0", "id": 1, "method": "message/send",
@@ -309,6 +335,35 @@ class Director:
             raise RuntimeError(f"{who}: {body['error'].get('message')}")
         return "\n".join(p.get("text", "") for p in body.get("result", {}).get("parts", []))
 
+    def _ask_v1(self, who: str, text: str) -> str:
+        message = {"messageId": uuid.uuid4().hex, "role": "ROLE_USER",
+                   "parts": [{"text": text}]}
+        if who in self.crew_contexts:
+            message["contextId"] = self.crew_contexts[who]
+        r = httpx.post(
+            f"{A2A[who]}/",
+            json={"jsonrpc": "2.0", "id": 1, "method": "SendMessage",
+                  "params": {"message": message}},
+            # Without it a v1 server takes the call for A2A 0.3 and refuses it.
+            headers={**tracing.headers(), "A2A-Version": "1.0"},
+            timeout=180,
+        )
+        r.raise_for_status()
+        body = r.json()
+        if "error" in body:
+            raise RuntimeError(f"{who}: {body['error'].get('message')}")
+        result = body.get("result") or {}
+        task = result.get("task") or {}
+        reply = result.get("message") or (task.get("status") or {}).get("message") or {}
+        if ctx := task.get("contextId") or reply.get("contextId"):
+            self.crew_contexts[who] = ctx
+        state = (task.get("status") or {}).get("state", "TASK_STATE_COMPLETED")
+        parts = [p for a in task.get("artifacts") or [] for p in a.get("parts") or []]
+        answer = "\n".join(p.get("text", "") for p in parts or reply.get("parts") or [])
+        if state != "TASK_STATE_COMPLETED":
+            raise RuntimeError(f"{who}: {state}: {answer}")
+        return answer
+
     async def _run_tool(self, name: str, args: dict) -> dict:
         with tracing.span(f"tool:{name}", **{"tool.name": name}):
             return await self._run_tool_inner(name, args)
@@ -321,6 +376,15 @@ class Director:
             args = dict(args)
             # Always paint the NEWEST photo, whatever handle the model chose --
             # so "take another photo" then "make them dance" uses the retake.
+            if not self.last_photo and not args.get("image_handle"):
+                # No photo in this session yet: "use my latest photo and make
+                # them fly" in ONE message reads as step 3 alone, and the model
+                # skips fetching it. The inbox's newest photo is the only one
+                # it could have meant -- and the one the studio page is already
+                # showing, so it is used, not shown again.
+                _echo("camera_latest_photo", {}, self.emit)
+                out = await tools.call("camera_latest_photo", {})
+                self.last_photo = out.get("image_handle", "")
             if self.last_photo:
                 args["image_handle"] = self.last_photo
             if args.get("instruction"):
@@ -444,7 +508,9 @@ class Director:
         try:
             shown = await tools.call(
                 "stage_show", {f"{kind}_handle": handle, "caption": caption})
-            self.emit(f"  \u25B6\uFE0F  \033[2m{caption.lower()}\033[0m")
+            # The caption is for the projector; the progress line says what happened.
+            what = "on screen" if kind == "image" else caption.lower()
+            self.emit(f"  \u25B6\uFE0F  \033[2m{what}\033[0m")
             if isinstance(shown, dict) and shown.get("holds"):
                 # The window now parks on the QR card instead of closing.
                 self.emit("  \033[2m   (it holds on the QR code — press q to close)\033[0m")
