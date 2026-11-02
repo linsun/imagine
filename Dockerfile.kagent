@@ -1,0 +1,22 @@
+# The image for the three agents on kagent (k8s/kagent/): Director, Scout, DP
+# as BYO Harnesses, all served by agent/kagent_runtime.py.
+#
+# Alpine for the same reason as Dockerfile.agents, though it matters less
+# here: kagent snapshots only the actor's volumes, so a resumed actor is a
+# fresh process and pointer-authentication keys never go stale.
+FROM python:3.12-alpine
+
+ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/app
+
+WORKDIR /app
+COPY agent/requirements-kagent.txt agent-requirements.txt
+# git only for kagent-core / kagent-proto, which come from the kagent repo.
+RUN apk add --no-cache --virtual .build git \
+ && pip install --no-cache-dir -r agent-requirements.txt \
+ && apk del .build
+
+COPY agent ./agent
+
+ENV OUTPUT_DIR=/data/outputs
+EXPOSE 80 8081
+CMD ["python", "-m", "agent.kagent_runtime", "director"]
