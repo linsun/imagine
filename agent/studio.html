@@ -1,0 +1,489 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>imagine studio</title>
+<style>
+  :root {
+    --bg: #0b0b10; --panel: #15151d; --line: #262633; --text: #ececf1;
+    --dim: #8b8b9c; --accent: #ffb547; --live: #5ee2a0; --sleep: #7c8cff; --bad: #ff6b6b;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  main { max-width: 1280px; margin: 0 auto; padding: 20px 16px 140px; }
+  header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 18px; }
+  header h1 { font-size: 18px; margin: 0; letter-spacing: .04em; }
+  header h1 b { color: var(--accent); }
+  header .host { color: var(--dim); font-size: 12px; margin-left: auto; font-family: ui-monospace, monospace; }
+  header .who { font-size: 13px; padding: 6px 12px; }
+  header .who.in { border-color: var(--live); color: var(--live); }
+
+  /* The wake: the first thing anyone sees. */
+  .wake { background: radial-gradient(120% 140% at 0% 0%, #1d1d3a 0%, var(--panel) 60%);
+    border: 1px solid var(--line); border-radius: 16px; padding: 22px 24px; margin-bottom: 18px;
+    display: flex; align-items: center; gap: 20px; }
+  .wake .moon { font-size: 44px; transition: transform .8s; }
+  .wake.awake .moon { transform: rotate(-20deg) scale(.9); }
+  .wake h2 { margin: 0; font-size: clamp(22px, 3.2vw, 34px); font-weight: 650; }
+  .wake p { margin: 4px 0 0; color: var(--dim); }
+  .wake p b { color: var(--text); font-weight: 600; }
+
+  .grid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 18px; }
+  @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } main { padding-bottom: 200px; } }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
+
+  .screen { position: relative; aspect-ratio: 16 / 10; background: #000; display: grid; place-items: center; }
+  .screen img, .screen video { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .screen .empty { color: var(--dim); text-align: center; padding: 24px; }
+  .screen .tag { position: absolute; left: 12px; top: 12px; background: #000a; padding: 3px 10px;
+    border-radius: 99px; font-size: 12px; color: var(--dim); }
+  .screen .unmute { position: absolute; right: 12px; bottom: 12px; display: none; }
+
+  .crew { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding: 14px; }
+  .agent { border: 1px solid var(--line); border-radius: 12px; padding: 12px; text-align: center;
+    transition: border-color .3s, box-shadow .3s, opacity .3s; opacity: .55; }
+  .agent .face { font-size: 30px; }
+  .agent .name { font-weight: 600; margin-top: 2px; }
+  .agent .state { font-size: 12px; color: var(--dim); min-height: 1.4em; }
+  .agent.busy { opacity: 1; border-color: var(--accent); box-shadow: 0 0 0 3px #ffb54722; }
+  .agent.busy .face { animation: bob 1.2s ease-in-out infinite; }
+  .agent.done { opacity: 1; border-color: var(--live); }
+  @keyframes bob { 50% { transform: translateY(-4px); } }
+
+  .steps { list-style: none; margin: 0; padding: 0 14px 14px; max-height: 340px; overflow: auto; }
+  .steps li { padding: 7px 10px; border-left: 2px solid var(--line); color: var(--dim);
+    animation: in .35s ease-out; }
+  .steps li.now { color: var(--text); border-left-color: var(--accent); }
+  .steps li.err { color: var(--bad); border-left-color: var(--bad); }
+  @keyframes in { from { opacity: 0; transform: translateX(-6px); } }
+  .reply { margin: 0 14px 14px; padding: 12px 14px; border-radius: 12px; background: #1c1c27;
+    white-space: pre-wrap; display: none; }
+  .section { padding: 12px 14px 0; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--dim); }
+
+  .composer { position: fixed; left: 0; right: 0; bottom: 0; padding: 14px 16px 18px;
+    background: linear-gradient(transparent, var(--bg) 30%); }
+  .composer form { max-width: 1280px; margin: 0 auto; display: flex; gap: 10px; flex-wrap: wrap; }
+  .composer input { flex: 1 1 260px; min-width: 0; background: var(--panel); color: var(--text);
+    border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; font: inherit; }
+  button { font: inherit; border-radius: 12px; border: 1px solid var(--line); background: var(--panel);
+    color: var(--text); padding: 12px 16px; cursor: pointer; }
+  button.primary { background: var(--accent); color: #1a1205; border: 0; font-weight: 700; padding: 12px 20px; }
+  button:disabled { opacity: .5; cursor: default; }
+  .composer .meta { max-width: 1280px; margin: 6px auto 0; font-size: 12px; color: var(--dim); }
+  .composer .meta a { color: var(--dim); }
+
+  .drop { position: fixed; inset: 0; display: none; place-items: center; background: #0b0b10e6;
+    border: 3px dashed var(--accent); font-size: 26px; z-index: 5; }
+  body.dragging .drop { display: grid; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1><b>imagine</b> · studio</h1>
+    <span class="host" id="host"></span>
+    <button class="who" id="who" title="Publishing needs a signed-in person">🔑 sign in</button>
+  </header>
+
+  <section class="wake" id="wake">
+    <div class="moon">🌙</div>
+    <div>
+      <h2 id="wake-title">Waking up…</h2>
+      <p id="wake-sub">This page is served by an Agent Substrate actor.</p>
+    </div>
+  </section>
+
+  <div class="grid">
+    <section class="panel">
+      <div class="screen" id="screen">
+        <div class="empty">No photo yet.<br>Drop one on this page, or send it from the phone or laptop.</div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="section">The crew</div>
+      <div class="crew">
+        <div class="agent" id="a-director"><div class="face">🎬</div><div class="name">Director</div><div class="state">asleep</div></div>
+        <div class="agent" id="a-scout"><div class="face">✨</div><div class="name">Scout</div><div class="state">asleep</div></div>
+        <div class="agent" id="a-dp"><div class="face">🎥</div><div class="name">DP</div><div class="state">asleep</div></div>
+      </div>
+      <div class="section">What they're doing</div>
+      <ul class="steps" id="steps"></ul>
+      <div class="reply" id="reply"></div>
+    </section>
+  </div>
+</main>
+
+<div class="composer">
+  <form id="form">
+    <input id="text" autocomplete="off" placeholder="Talk to the Director…">
+    <button type="submit" class="primary" id="send">Send</button>
+  </form>
+  <div class="meta"><span id="session"></span> · <a href="#" id="new">new session</a></div>
+</div>
+<div class="drop">Drop the photo to send it to the inbox</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+// ------------------------------------------------------------ the wake
+function ago(s) {
+  s = Math.max(0, Math.round(s));
+  if (s < 60) return s + "s";
+  const m = Math.round(s / 60);
+  if (m < 60) return m + " min";
+  const h = Math.floor(m / 60), r = m % 60;
+  if (h < 24) return h + "h " + (r ? r + "m" : "");
+  return Math.floor(h / 24) + "d " + (h % 24) + "h";
+}
+
+async function showWake() {
+  const nav = performance.getEntriesByType("navigation")[0];
+  const arrived = nav ? (nav.responseStart - nav.requestStart) / 1000 : null;
+  let me;
+  try { me = await (await fetch("api/self", {cache: "no-store"})).json(); } catch { return; }
+  $("host").textContent = "actor " + me.host;
+  const w = me.last_wake, sinceWake = w ? me.now - w.at : null;
+  const wake = $("wake");
+  wake.classList.add("awake");
+  wake.querySelector(".moon").textContent = "☀️";
+  // Woken by this visit: the clock gap ended in the last few seconds.
+  if (w && sinceWake < 15 + (arrived || 0)) {
+    $("wake-title").textContent = "I was asleep for " + ago(w.slept_s) + ".";
+    $("wake-sub").innerHTML = "You just woke me up. This page arrived in <b>" +
+      (arrived != null ? arrived.toFixed(1) + "s" : "a moment") +
+      "</b>, restored from a snapshot with its memory intact. Wake-up #" + me.wakes + ".";
+  } else {
+    $("wake-title").textContent = "Awake for " + ago(w ? sinceWake : me.now - me.started_at) + ".";
+    $("wake-sub").innerHTML = (w ? "Last nap: <b>" + ago(w.slept_s) + "</b>. " : "") +
+      "Served by an Agent Substrate actor that sleeps when nobody is looking.";
+  }
+}
+
+// ------------------------------------------------------------ the screen
+let photoAt = null, stageSeq = null, showing = "";
+
+function show(kind, src, tag) {
+  const s = $("screen");
+  if (kind === "video") {
+    s.innerHTML = '<video autoplay playsinline controls></video><span class="tag"></span>' +
+                  '<button class="unmute">🔊 Sound on</button>';
+    const v = s.querySelector("video"), b = s.querySelector(".unmute");
+    v.src = src;
+    v.play().catch(() => { v.muted = true; v.play(); b.style.display = "block"; });
+    b.onclick = () => { v.muted = false; b.style.display = "none"; };
+  } else {
+    s.innerHTML = '<img alt=""><span class="tag"></span>';
+    s.querySelector("img").src = src;
+  }
+  s.querySelector(".tag").textContent = tag;
+  showing = kind;
+}
+
+async function pollScreen() {
+  try {
+    const st = await (await fetch("stage/state", {cache: "no-store"})).json();
+    if (stageSeq !== null && st.seq !== stageSeq && st.kind) {
+      show(st.kind === "video" ? "video" : "image", "stage/media?" + st.seq,
+           st.caption || (st.kind === "video" ? "the film" : "on stage"));
+    }
+    stageSeq = st.seq;
+  } catch {}
+  if (showing !== "video") {
+    try {
+      const p = await (await fetch("photo/latest", {cache: "no-store"})).json();
+      if (p.has_photo && p.received_at !== photoAt) {
+        photoAt = p.received_at;
+        show("image", "photo/latest.jpg?" + photoAt, "latest photo");
+      }
+    } catch {}
+  }
+}
+
+// Drop a photo anywhere: it goes to the same inbox the phone posts to.
+let depth = 0;
+addEventListener("dragenter", (e) => { e.preventDefault(); depth++; document.body.classList.add("dragging"); });
+addEventListener("dragleave", () => { if (--depth <= 0) { depth = 0; document.body.classList.remove("dragging"); } });
+addEventListener("dragover", (e) => e.preventDefault());
+addEventListener("drop", async (e) => {
+  e.preventDefault(); depth = 0; document.body.classList.remove("dragging");
+  const f = [...e.dataTransfer.files].find((f) => f.type.startsWith("image/") || /\.hei[cf]$/i.test(f.name));
+  if (!f) return;
+  step("📤 sending " + f.name + " to the inbox");
+  const r = await fetch("photo/upload", {method: "POST", body: f,
+                                         headers: {"Content-Type": f.type || "image/heic"}});
+  step(r.ok ? "📥 in the inbox: ask for your latest photo" : "! upload failed (" + r.status + ")", !r.ok);
+  showing = ""; pollScreen();
+});
+
+// ------------------------------------------------------------ the crew
+const CREW = {scout: /imagining the scene/i, dp: /camera move|music/i};
+
+function crew(who, cls, text) {
+  const el = $("a-" + who);
+  el.classList.remove("busy", "done");
+  if (cls) el.classList.add(cls);
+  el.querySelector(".state").textContent = text;
+}
+
+function step(text, err) {
+  const li = document.createElement("li");
+  li.textContent = text;
+  if (err) li.className = "err";
+  const ul = $("steps");
+  ul.querySelectorAll("li.now").forEach((x) => x.classList.remove("now"));
+  if (!err) li.classList.add("now");
+  ul.appendChild(li);
+  ul.scrollTop = ul.scrollHeight;
+  for (const [who, re] of Object.entries(CREW)) {
+    if (re.test(text)) crew(who, "busy", "working");
+    else if ($("a-" + who).classList.contains("busy")) crew(who, "done", "done");
+  }
+}
+
+// ------------------------------------------------------------ sign-in (Keycloak)
+// The gateway refuses `publish` without a signed-in person. Sign in here
+// (Authorization Code + PKCE, a public client: no secret), and the token goes
+// with each message to the Director. kagent passes it through, and the
+// Director carries it into its MCP calls. The issuer must be exactly the one
+// the gateway trusts, http://localhost:8080 (scripts/k8s-pf.sh forwards it).
+const KC = "http://localhost:8080/realms/my-realm/protocol/openid-connect";
+const KC_CLIENT = "mcp-client", KC_SCOPES = "openid mcp:tools";
+const REDIRECT = location.origin + location.pathname;
+
+const b64url = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes)))
+  .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const claims = (jwt) => {
+  try { return JSON.parse(atob(jwt.split(".")[1].replace(/-/g, "+").replace(/_/g, "/"))); } catch { return {}; }
+};
+
+let tok = null;   // {access, refresh, exp, user}
+try { tok = JSON.parse(sessionStorage.getItem("imagine.tok")) || null; } catch {}
+function setTok(t) {
+  tok = t;
+  try { t ? sessionStorage.setItem("imagine.tok", JSON.stringify(t)) : sessionStorage.removeItem("imagine.tok"); } catch {}
+  const b = $("who");
+  b.textContent = t ? "✓ " + t.user : "🔑 sign in";
+  b.title = t ? "Signed in with Keycloak. Click to sign out." : "Publishing needs a signed-in person";
+  b.classList.toggle("in", !!t);
+}
+function fromResponse(j) {
+  const c = claims(j.access_token);
+  return {access: j.access_token, refresh: j.refresh_token || "",
+          exp: c.exp || Date.now() / 1000 + (j.expires_in || 300),
+          user: c.preferred_username || c.email || c.sub || "you"};
+}
+async function tokenCall(form) {
+  const r = await fetch(KC + "/token", {method: "POST", body: new URLSearchParams(form)});
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || !j.access_token) throw new Error(j.error_description || j.error || "Keycloak answered " + r.status);
+  return fromResponse(j);
+}
+
+// The popup comes back here with ?code=: hand it to the page that opened it
+// (a BroadcastChannel, which works even if the opener link was cut) and close.
+const kcChannel = new BroadcastChannel("imagine-kc");
+const back = new URLSearchParams(location.search);
+if (back.has("state") && (back.has("code") || back.has("error"))) {
+  kcChannel.postMessage(Object.fromEntries(back));
+  history.replaceState(null, "", location.pathname);
+  if (window.name === "kc") window.close();
+}
+
+const exchange = (code, verifier) => tokenCall({grant_type: "authorization_code", client_id: KC_CLIENT,
+                                                 code, redirect_uri: REDIRECT, code_verifier: verifier});
+
+// Sign in in a popup, so the page (and the film on screen) stays as it is.
+// Keycloak remembers the session, so a second sign-in closes by itself. If
+// popups are blocked, the whole page goes to Keycloak and comes back, and
+// `pending` (the message that needed the sign-in) is sent then.
+function signIn(pending) {
+  const pop = window.open("", "kc", "width=480,height=640");   // now, while the click counts
+  return new Promise(async (resolve, reject) => {
+    const verifier = b64url(crypto.getRandomValues(new Uint8Array(32)));
+    const state = crypto.randomUUID();
+    const challenge = b64url(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)));
+    const url = KC + "/auth?" + new URLSearchParams({
+      client_id: KC_CLIENT, response_type: "code", redirect_uri: REDIRECT, scope: KC_SCOPES,
+      state, code_challenge: challenge, code_challenge_method: "S256"});
+    if (!pop) {
+      try { sessionStorage.setItem("imagine.kc", JSON.stringify({state, verifier, pending: pending || ""})); }
+      catch { return reject(new Error("the sign-in popup was blocked")); }
+      location.assign(url);   // this page leaves; it finishes the sign-in when it comes back
+      return;
+    }
+    pop.location = url;
+    let settled = false;
+    const closed = setInterval(() => {
+      // Give the popup's message a moment to land before calling it closed.
+      if (pop.closed) setTimeout(() => { if (!settled) { done(); reject(new Error("sign-in was closed")); } }, 1000);
+    }, 500);
+    const done = () => { settled = true; clearInterval(closed); kcChannel.removeEventListener("message", onMsg); };
+    async function onMsg(e) {
+      const kc = e.data || {};
+      if (kc.state !== state) return;   // another tab's sign-in
+      done();
+      if (kc.error) return reject(new Error(kc.error_description || kc.error));
+      try { resolve(await exchange(kc.code, verifier)); } catch (err) { reject(err); }
+    }
+    kcChannel.addEventListener("message", onMsg);
+  });
+}
+
+// A live access token, refreshed if it is about to run out ("" if none).
+async function accessToken() {
+  if (!tok) return "";
+  if (tok.exp > Date.now() / 1000 + 30) return tok.access;
+  if (tok.refresh) {
+    try { setTok(await tokenCall({grant_type: "refresh_token", client_id: KC_CLIENT, refresh_token: tok.refresh}));
+          return tok.access; } catch {}
+  }
+  setTok(null);
+  return "";
+}
+
+async function ensureSignedIn(pending) {
+  if (await accessToken()) return true;
+  step("🔑 publishing needs a signed-in person: opening Keycloak");
+  try {
+    setTok(await signIn(pending));
+    step("✓ signed in as " + tok.user);
+    return true;
+  } catch (e) {
+    step("! " + e.message, true);
+    return false;
+  }
+}
+
+// Back from a full-page sign-in (popups were blocked): finish it here, then
+// send the message that was waiting for it.
+async function finishRedirect() {
+  let saved = null;
+  try { saved = JSON.parse(sessionStorage.getItem("imagine.kc")); sessionStorage.removeItem("imagine.kc"); } catch {}
+  if (!saved || window.name === "kc" || back.get("state") !== saved.state) return;
+  if (back.has("error")) return step("! " + (back.get("error_description") || back.get("error")), true);
+  try {
+    setTok(await exchange(back.get("code"), saved.verifier));
+    step("✓ signed in as " + tok.user);
+  } catch (e) { return step("! " + e.message, true); }
+  if (saved.pending) ask(saved.pending);
+}
+
+setTok(tok);
+finishRedirect();
+$("who").onclick = async () => {
+  if (tok) { setTok(null); return; }
+  $("steps").innerHTML = "";
+  await ensureSignedIn();
+};
+
+// ------------------------------------------------------------ the Director (A2A v1)
+let ctx = "";
+try { ctx = localStorage.getItem("imagine.ctx") || ""; } catch {}
+function setCtx(c) {
+  ctx = c || "";
+  try { ctx ? localStorage.setItem("imagine.ctx", ctx) : localStorage.removeItem("imagine.ctx"); } catch {}
+  $("session").textContent = ctx ? "session " + ctx.slice(0, 13) + "…" : "no session yet";
+}
+setCtx(ctx);
+$("new").onclick = (e) => { e.preventDefault(); setCtx(""); $("steps").innerHTML = ""; $("reply").style.display = "none"; };
+
+const texts = (parts) => (parts || []).map((p) => p.text || "").filter(Boolean).join("\n");
+
+// A session the Director no longer knows (kagent refuses it: "context does not
+// belong to this Agent" after a redeploy into another namespace, or not found
+// after a purge). The id lives in localStorage, so it outlives the Agent.
+const staleSession = (msg) => /does not belong|not found/i.test(msg || "");
+
+async function ask(text, retried = false) {
+  $("send").disabled = true;
+  $("reply").style.display = "none";
+  if (!retried) $("steps").innerHTML = "";
+  if (!retried) step("🗣️ " + text);
+  // Same test the Director uses (kagent_runtime.py): "publish" retries the
+  // last film, and that needs a token -- so sign in first.
+  if (/\bpublish\b/i.test(text) && !(await ensureSignedIn(text))) { $("send").disabled = false; return; }
+  const bearer = await accessToken();
+  const t0 = performance.now();
+  let first = true, reply = "", retry = false;
+  crew("director", "busy", "waking…");
+  const tick = setInterval(() => {
+    if (first) crew("director", "busy", "waking… " + ((performance.now() - t0) / 1000).toFixed(1) + "s");
+  }, 100);
+
+  const message = {messageId: crypto.randomUUID(), role: "ROLE_USER", parts: [{text}]};
+  if (ctx) message.contextId = ctx;
+  try {
+    const r = await fetch("director/", {
+      method: "POST",
+      headers: {"Content-Type": "application/json", "Accept": "text/event-stream", "A2A-Version": "1.0",
+                ...(bearer ? {"Authorization": "Bearer " + bearer} : {})},
+      body: JSON.stringify({jsonrpc: "2.0", id: crypto.randomUUID(),
+                            method: "SendStreamingMessage", params: {message}}),
+    });
+    if (!r.ok) throw new Error("the Director answered " + r.status);
+    const reader = r.body.pipeThrough(new TextDecoderStream()).getReader();
+    let buf = "";
+    for (;;) {
+      const {value, done} = await reader.read();
+      if (done) break;
+      buf = (buf + value).replace(/\r\n/g, "\n");   // SSE may frame with CRLF
+      let i;
+      while ((i = buf.indexOf("\n\n")) >= 0) {
+        const chunk = buf.slice(0, i); buf = buf.slice(i + 2);
+        const data = chunk.split("\n").filter((l) => l.startsWith("data:")).map((l) => l.slice(5)).join("");
+        if (!data) continue;
+        const ev = JSON.parse(data);
+        if (ev.error) throw new Error(ev.error.message);
+        const res = ev.result || {};
+        const item = Object.values(res)[0] || {};
+        if (item.contextId && item.contextId !== ctx) setCtx(item.contextId);
+        if (first) {
+          first = false;
+          crew("director", "busy", "awake in " + ((performance.now() - t0) / 1000).toFixed(1) + "s");
+        }
+        if (res.statusUpdate) {
+          const st = res.statusUpdate.status || {}, line = texts((st.message || {}).parts);
+          if (st.state === "TASK_STATE_WORKING" && line) step(line);
+          else if (line) reply = line;
+        } else if (res.artifactUpdate) {
+          reply = texts(res.artifactUpdate.artifact.parts);
+        } else if (res.task) {
+          const arts = (res.task.artifacts || []).flatMap((a) => a.parts || []);
+          reply = texts(arts) || texts(((res.task.status || {}).message || {}).parts) || reply;
+        } else if (res.message) {
+          reply = texts(res.message.parts);
+        }
+      }
+    }
+    crew("director", "done", "done in " + ((performance.now() - t0) / 1000).toFixed(0) + "s");
+  } catch (e) {
+    if (!retried && ctx && first && staleSession(e.message)) {
+      step("old session " + ctx.slice(0, 13) + "… is gone; starting a new one");
+      setCtx("");
+      retry = true;
+    } else {
+      step("! " + e.message, true);
+      crew("director", "", "error");
+    }
+  } finally {
+    clearInterval(tick);
+    ["scout", "dp"].forEach((w) => { if ($("a-" + w).classList.contains("busy")) crew(w, "done", "done"); });
+    $("steps").querySelectorAll("li.now").forEach((x) => x.classList.remove("now"));
+    if (reply) { $("reply").textContent = reply; $("reply").style.display = "block"; }
+    $("send").disabled = false;
+    pollScreen();
+  }
+  if (retry) return ask(text, true);
+}
+
+$("form").onsubmit = (e) => { e.preventDefault(); const t = $("text").value.trim(); if (t) { $("text").value = ""; ask(t); } };
+
+showWake();
+pollScreen();
+setInterval(pollScreen, 2500);
+</script>
+</body>
+</html>
