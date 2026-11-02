@@ -27,7 +27,7 @@ echo "starting:"
 GEMINI_BASE_URL="${AGW_LLM:-http://localhost:3000}" \
 MCP_PORT="${VISION_MCP_PORT:-8000}" \
   start vision-mcp "$PY" -c \
-  "import sys; sys.path.insert(0,'../mcp-server'); from vision_mcp.server import main; main()"
+  "import sys; sys.path.insert(0,'mcp-server'); from vision_mcp.server import main; main()"
 
 # These processes get NO provider credentials -- not "they don't use them",
 # they are not in the environment at all, so nothing can leak or fall back.

@@ -96,7 +96,7 @@ difference between charming and clumsy in a Tokyo room.
 
 ## Presets — the safety net
 
-`../mcp-server/vision_mcp/presets.py` still holds the original style and motion
+`mcp-server/vision_mcp/presets.py` still holds the original style and motion
 presets. The Director doesn't reach for them (the Scout and DP replace them),
 but they remain a deterministic fallback:
 

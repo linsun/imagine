@@ -1,136 +1,195 @@
-# Imagine
+# Imagine — the AGNTCon + MCPCon Japan demo
 
-Capture or upload a photo in your browser, then ask an AI agent to reimagine it
-&mdash; "add a NYC vibe and connect the people with bridges", "give it Japanese
-culture", and more. You can also **animate the result into a short video clip**.
-Image transforms are powered by Google Gemini's Nano Banana image model; video is
-powered by Veo.
+> **Layout.** The demo is the repo root; the old imagine web app is gone (it is
+> still on `main` and in git history). `mcp-server/` is vision-mcp, which the
+> demo runs as is. For the KubeCon NA version on Agent Substrate, see
+> `k8s/README.md`.
 
-Inspired by [kagent_vision](https://github.com/automateyournetwork/kagent_vision),
-re-architected to run cleanly in Kubernetes.
+Transform the room into a movie and
+publish it as a GitHub release. Every connections goes through **agentgateway**. Use agentgateway 1.5 or newer.
 
-## Architecture
+The agents don't use the keys, the credentials were injected via agentgateway. The MCP servers also don't use keys, except `vision-mcp` keeps `GEMINI_API_KEY` for the Veo call. The public MCP is gated via agentgateway auth using keycloak as the IDP.
 
-Three small services:
-
-| Component | What it does | Tech |
-| --- | --- | --- |
-| `frontend/` | Single-page UI: webcam capture, upload, presets, chat, before/after | nginx + vanilla JS + Tailwind |
-| `backend/` | API + lightweight Gemini agent; owns image storage/serving | FastAPI |
-| `mcp-server/` | Reusable MCP tools that do the actual image transforms | FastMCP + google-genai |
-
-```
-Browser  -->  Backend (agent)  -->  MCP server  -->  Gemini (Nano Banana)
-                   ^                      |
-                   +-- base64 image bytes-+   (no shared volume needed)
-```
-
-The MCP server returns transformed images as base64, so the backend owns
-storage and serving and no ReadWriteMany volume is required across pods.
-
-## Prerequisites
-
-- Docker
-- A Google AI (Gemini) API key: https://aistudio.google.com/apikey
-- For Kubernetes: `kubectl` and [`kind`](https://kind.sigs.k8s.io/) (or Docker Desktop's k8s)
-
-Set your key:
+## Setup
 
 ```bash
-cp .env.example .env
-# edit .env and set GEMINI_API_KEY=...
+brew install ...                       # nothing special; python3 + a webcam
+cd imagine                             # repo root
+./imagine install
+./scripts/install-gateway.sh           # pins agentgateway >= v1.5.0 into bin/
+cp .env.example .env && $EDITOR .env   # GEMINI_API_KEY at minimum
 ```
 
-## Option A: Run locally with Docker Compose
+## Run
 
 ```bash
-docker compose up --build
+./imagine start     # everything up, then the Director. This is the one command.
 ```
 
-Open http://localhost:8088
-
-- Frontend: http://localhost:8088
-- Backend API: http://localhost:8080 (e.g. `GET /healthz`, `GET /api/styles`)
-- MCP server: http://localhost:8000/mcp
-
-## Option B: Run on Kubernetes (kind)
+Or a step at a time:
 
 ```bash
-./scripts/kind-up.sh         # create local cluster
-./scripts/build-and-load.sh  # build images + load into kind
-./scripts/deploy.sh          # create secret from .env, apply manifests, wait
+./imagine up        # vision-mcp, scout, dp, then agentgateway (which spawns the stdio servers)
+./imagine verify    # ← do this before a talk. Twelve checks, in risk order.
+./imagine demo      # the Director REPL
+./imagine status    # what is running, and where
+./imagine down
 ```
 
-Then access the app (using localhost so the browser webcam works without TLS):
+`./imagine` is a plain stdlib Python script that shells out to the same
+`scripts/*.sh`.
+
+Then just talk to it:
+
+```
+you › take a photo of the room and make my audience do a Japanese dance
+```
+
+## Virtual keys and budgets (agentgateway 1.5.0)
+
+The agents no longer send a placeholder string as their API key — they send
+`AGW_VIRTUAL_KEY`, a **virtual** key that exists only in agentgateway. It
+cannot talk to Gemini or OpenAI; it is an identity to charge. `gateway/config.yaml`
+stores only its SHA-256, so nothing secret is committed:
+
+```yaml
+llm:
+  policies:
+    apiKey:
+      mode: strict
+      keys:
+      - keyHash: sha256:<printf '%s' "$AGW_VIRTUAL_KEY" | shasum -a 256>
+        metadata: {name: director}   # `name` is required when a key has budgets
+        budgets:
+        - name: daily-spend
+          limit: {unit: USD, amount: 10}
+          window: {rolling: 24h}
+          onBudgetExceeded: Block
+```
+
+## GitHub through the gateway
+
+The publish MCP server used to read `GITHUB_TOKEN` and call `api.github.com`
+itself. It no longer holds a credential at all — the same move already made for
+Gemini, applied to the third provider.
+
+```yaml
+gateways:
+  github-gw:
+    port: 3004
+routes:
+- name: github-api
+  gateways: [github-gw]
+  matches:
+  - path: {pathPrefix: /api}
+  policies:
+    urlRewrite:
+      path: {prefix: /}            # /api/user -> api.github.com/user
+  backends:
+  - host: api.github.com:443
+    policies:
+      backendAuth:
+        key:
+          value: $GITHUB_TOKEN     # the gateway's copy, not the server's
+      backendTLS: {}
+- name: github-uploads             # same shape, /uploads -> uploads.github.com
+```
+
+**One port, two routes.** Release assets go to `uploads.github.com` and
+everything else to `api.github.com` — two different services, so they are two
+*routes* selected by path prefix. Not two hosts on one backend, and not two
+backends on one route: both of those mean load balancing, which would send half
+your API calls to the upload host.
+
+`backendAuth`'s default location is `Authorization: Bearer <value>`, which is
+exactly what GitHub wants, and it *overwrites* whatever the caller sent.
+
+
+### Both sides of the hop
+
+The route is guarded going in as well as going out. Inbound it requires the
+same virtual key the agents use on the LLM listener; outbound `backendAuth`
+replaces that header with the GitHub token:
+
+```yaml
+  policies:
+    apiKey:                    # who are you
+      mode: strict
+      keys:
+      - keyHash: sha256:...
+        metadata: {name: publish}
+  backends:
+  - host: api.github.com:443
+    policies:
+      backendAuth:             # what you may borrow
+        key: {value: $GITHUB_TOKEN}
+```
+
+## Publishing needs a person (Keycloak + MCP auth)
+
+Publishing is the one action in the show that touches the real world, so the
+gateway refuses it unless a person has signed in. This is agentgateway's MCP
+auth feature — `mcpAuthentication` + `mcpAuthorization` on the MCP listener,
+validating a real Keycloak JWT — not the apiKey policy.
+
+```yaml
+mcp:
+  policies:
+    mcpAuthentication:
+      mode: optional
+      issuer: http://localhost:8080/realms/my-realm
+      audiences: [publish-mcp-server]
+      provider: {keycloak: {}}       # first-class: derives JWKS, serves metadata
+    mcpAuthorization:
+      rules:
+      - deny: 'mcp.tool.target == "publish" && !has(jwt.sub)'
+```
+
+`mode: optional` so the four other targets stay open — the authorization rule
+is what refuses publish, and only publish. `provider: keycloak` is why Keycloak
+and not a bare JWKS URL: agentgateway derives Keycloak's non-standard JWKS path,
+serves protected-resource metadata, and returns `401` + `WWW-Authenticate` so a
+standard MCP client can discover where to log in.
+
+The person's Keycloak identity authorizes
+  the publish *tool call* at the MCP listener; the gateway then injects the
+  *GitHub* credential outbound via `backendAuth`. The person never holds the
+  GitHub token; the GitHub token never carries the person's identity.
+
+The gateway fetches the JWKS while *parsing* its config, so
+Keycloak must be up before the gateway starts — otherwise the whole config is
+rejected (the running gateway keeps its old config; it does not die). `up.sh`
+and `preflight` check this, and `./imagine auth off` drops the policy in one
+command if Keycloak is unavailable. Start Keycloak with your seed realm:
 
 ```bash
-kubectl port-forward -n default svc/frontend 8088:80
+docker run -d --name keycloak -p 8080:8080 -p 8443:8443 \
+  -e KC_BOOTSTRAP_ADMIN_USERNAME=admin \
+  -e KC_BOOTSTRAP_ADMIN_PASSWORD=admin \
+  -v "$(pwd)/keycloak-seed:/opt/keycloak/data/import:ro" \
+  quay.io/keycloak/keycloak:26.4.1 start-dev --import-realm
 ```
 
-Open http://localhost:8088
+`./imagine login` / `logout` / `auth status` exist as manual controls, but the
+demo path needs none of them.
 
-Useful checks:
+## What's here
 
-```bash
-kubectl get pods -n default
-kubectl logs -n default deploy/backend
-kubectl logs -n default deploy/vision-mcp
-```
-
-## Using the app
-
-1. Click **Start camera** then **Take photo**, or **Upload** an image.
-2. Pick a **preset** (NYC Vibe + Bridges, Japanese Culture, ...) and click
-   **Transform image** &mdash; or type a custom instruction.
-3. Pick a **motion style** and click **Animate image -> video** to turn the
-   current image into a short Veo clip (~1-2 min).
-4. Click **Ask agent** to chat naturally; the agent decides which tool to call
-   (transform, generate, or animate).
-5. See the before/after image and the generated video.
-
-## MCP tools
-
-| Tool | Description |
+| | |
 | --- | --- |
-| `list_styles` | List built-in image style presets |
-| `list_video_styles` | List built-in video motion presets |
-| `transform_image(image_b64, instruction, style_preset)` | Edit an image via instruction/preset |
-| `generate_image(prompt)` | Generate a brand-new image from text |
-| `generate_video(image_b64, instruction, motion_preset)` | Animate an image into a short video (Veo, long-running) |
+| `gateway/config.yaml` | Three listeners: `:3000` LLM, `:3001` MCP, `:3002`/`:3003` A2A (one per agent) |
+| `servers/viewfinder.py` | **long-lived** process that owns the camera and serves the MJPEG preview |
+| `servers/camera_mcp.py` | stdio, stateless. `preview_url`, `capture(countdown)`, `release`, `resume`, `list_images`, `load_image` |
+| `servers/stage_mcp.py` | stdio. `announce` (macOS `say`, offline), `show` |
+| `servers/post_mcp.py` | stdio. `add_credits` — Star Wars crawl over a starfield, ffmpeg |
+| `servers/publish_mcp.py` | stdio. `publish_video` (release asset), `open_pr`, `gallery_url` |
+| `agent/director.py` | The agent you talk to |
+| `agent/crew.py` | Scout + DP as A2A servers |
+| `agent/tools.py` | MCP client + the handle↔bytes swap |
+| `cast.txt` | The companies in the room. Edit this. |
+| `scripts/verify.sh` | The smoke test. Run it before believing anything |
+| `scripts/preflight.sh` | Morning-of checklist |
 
-## Adding a style preset
+`mcp-server` (your existing vision-mcp) is reused unchanged except for
+`genai_client.py`, which now honours `GEMINI_BASE_URL`.
 
-Edit [`mcp-server/vision_mcp/presets.py`](mcp-server/vision_mcp/presets.py) and
-add an entry to `PRESETS` with a `label` and a descriptive `prompt`. It will
-automatically show up in the frontend preset bar.
-
-## Configuration
-
-| Env var | Default | Where |
-| --- | --- | --- |
-| `GEMINI_API_KEY` | (required) | backend + mcp-server |
-| `IMAGE_MODEL` | `gemini-2.5-flash-image` | mcp-server (try `gemini-3.1-flash-image`) |
-| `VIDEO_MODEL` | `veo-3.1-lite-generate-preview` | mcp-server (try `veo-3.1-fast-generate-preview`) |
-| `VIDEO_DURATION` | `6` | mcp-server (clip length in seconds; shorter = faster) |
-| `TEXT_MODEL` | `gemini-2.5-flash` | backend (agent reasoning) |
-| `MCP_URL` | `http://vision-mcp:8000/mcp` | backend |
-| `OUTPUT_DIR` | `/data/outputs` | backend |
-
-## Troubleshooting
-
-- **No styles load / "MCP server unavailable"**: the backend can't reach the MCP
-  server. Check `kubectl logs -n default deploy/vision-mcp` and that `MCP_URL` is correct.
-- **Camera blocked**: browsers only allow `getUserMedia` over `https://` or
-  `http://localhost`. Use the `port-forward` URL (localhost), not a pod IP.
-- **"No image returned from model"**: your key may not have access to the image
-  model, or the prompt was refused. Try a different `IMAGE_MODEL` or instruction.
-- **Image generation is slow**: transforms typically take ~10-20s; the frontend
-  shows a status while it works.
-- **Video generation fails / times out**: Veo is a paid preview and latency
-  varies. The default `veo-3.1-lite-generate-preview` is the lowest-latency
-  option; you can also try `veo-3.1-fast-generate-preview`. Ensure your key has
-  Veo access. The pipeline waits up to ~15 minutes before giving up.
-
-## License
-
-Apache 2.0
