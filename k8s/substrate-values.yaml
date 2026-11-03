@@ -15,6 +15,15 @@ otel:
     # should show up in Jaeger.
     samplingRatio: 1.0
 
+# atelet pulls actor images itself, not through containerd, so the node's
+# certs.d mapping doesn't reach it: inside atelet, localhost:5001 is atelet's
+# own pod ("dial tcp [::1]:5001: connection refused", GoldenActorCrashed).
+# Send localhost pulls to the registry container on the kind network instead,
+# as Substrate's own kind install does.
+atelet:
+  extraArgs:
+  - --localhost-registry-replacement=kind-registry:5000
+
 # Who may reach actors through atenet-router (mTLS client certificates).
 # kagent install allows only kagent's controller. The studio page is served by
 # `kubectl ate proxy actor studio` (scripts/k8s-pf.sh), which mints a client

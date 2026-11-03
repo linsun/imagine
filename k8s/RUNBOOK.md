@@ -18,7 +18,8 @@ Where things live:
 ## 0. Shell setup (every new terminal)
 
 ```bash
-# kind create cluster --name kagent --image kindest/node:v1.37.0
+# Use the config: it maps localhost:5001 to the registry for the node's
+# containerd. Without it, every pod on a localhost:5001 image is ImagePullBackOff.
 kind create cluster --name kagent --config k8s/kind/kind-config.yaml
 ```
 
@@ -175,18 +176,29 @@ kubectl --context $CTX apply -f ~/src/github.com/linsun/substrate/manifests/ate-
 kubectl --context $CTX -n otel-system rollout status deploy/opentelemetry-collector deploy/jaeger --timeout=180s
 ```
 
-Substrate itself needs to be told where the collector is. `kagent install`
-sets no OTLP endpoint, so the chart turns export off on the workers
-(`OTEL_*_EXPORTER=none`) and Jaeger never shows an actor. Add the endpoint to
-the Substrate Helm release, keeping kagent's values (`k8s/substrate-values.yaml`
-also samples every trace instead of 1%):
+**Substrate's own settings.** `kagent install` leaves three things out of the
+Substrate Helm release. `k8s/substrate-values.yaml` adds them, keeping
+kagent's values:
+
+- **The OTLP endpoint.** Without it the chart turns export off on the workers
+  (`OTEL_*_EXPORTER=none`) and Jaeger never shows an actor. The file also
+  samples every trace instead of 1%.
+- **The kind registry for atelet.** atelet pulls actor images itself, not
+  through containerd, so the node's `certs.d` mapping doesn't reach it. Inside
+  atelet's pod `localhost:5001` is nothing, and every agent's template fails
+  with `GoldenActorCrashed ... dial tcp [::1]:5001: connect: connection refused`.
+  `--localhost-registry-replacement=kind-registry:5000` sends those pulls to
+  the registry container.
+- **The studio proxy on the router's allowlist** (phase 9).
 
 ```bash
 helm --kube-context $CTX -n ate-system upgrade substrate oci://ghcr.io/kagent-dev/substrate/helm/substrate \
   --version 1.0.0-rc1 --reuse-values -f k8s/substrate-values.yaml --wait
+kubectl --context $CTX -n ate-system get ds/atelet -o jsonpath='{.spec.template.spec.containers[0].args}' | grep -o 'localhost-registry-replacement=[^"]*'
 ```
 
-Don't `kubectl set env` the components instead: the chart's worker setting
+The upgrade restarts atelet, the router and the controller. Don't
+`kubectl set env` or patch the components instead: the chart's worker setting
 stays `none`, and the next Helm upgrade reverts it.
 
 Workers that already exist keep `none` until they're replaced. The script
@@ -199,8 +211,8 @@ kubectl --context $CTX -n $NS get pods -l ate.dev/worker-pool=imagine \
   -o jsonpath='{range .items[*]}{.metadata.name} {.spec.containers[0].env[?(@.name=="OTEL_TRACES_EXPORTER")].value}{"\n"}{end}'
 ```
 
-A `kagent install` (reinstall or upgrade) drops the setting; `./imagine k8s up`
-puts it back.
+A `kagent install` (reinstall or upgrade) drops all three settings;
+`./imagine k8s up` puts them back.
 
 ## 5. Keycloak (sign-in for "publish")
 
@@ -257,6 +269,9 @@ GITHUB_REPO="${GITHUB_REPO:-}" GITHUB_RELEASE_TAG="${GITHUB_RELEASE_TAG:-}" \
   envsubst '${IMAGE} ${AGW_VIRTUAL_KEY} ${GITHUB_REPO} ${GITHUB_RELEASE_TAG}' \
   < k8s/kagent/harness.yaml | kubectl --context $CTX apply -f -
 
+# Once only: the three per-agent Harnesses from before
+kubectl --context $CTX -n $NS delete harness imagine-director imagine-scout imagine-dp --ignore-not-found
+
 # What the actors may reach (the two gateways + the OTel collector), and the Agents themselves
 kubectl --context $CTX apply -f k8s/kagent/egress-policy.yaml -f k8s/kagent/agents.yaml
 
@@ -267,6 +282,18 @@ What "Ready" means: kagent compiled the Harness into an ActorTemplate, and
 Substrate took its **golden snapshot** (it started the image once and froze it
 after the readiness probe answered). No session actors exist yet. kagent
 creates one per conversation (A2A contextId) on the first message.
+
+If an Agent never gets Ready, look at its template. A filled-in ERROR column
+means the golden snapshot failed, and Substrate doesn't retry it:
+
+```bash
+kubectl ate --context $CTX get actor-templates -a $NS        # GOLDEN TAG filled in, ERROR empty
+```
+
+`GoldenActorCrashed ... [::1]:5001: connection refused` is the atelet registry
+setting from phase 4. Fix that, then change the Harness (a new image digest
+does it) so kagent makes a new template, or delete the failed one:
+`kubectl ate --context $CTX delete actor-template <name> -a $NS`.
 
 A new image digest means a new template, so **existing sessions keep the old
 code**. Click "new session" on the studio page (or restart `./imagine k8s demo`)
@@ -430,6 +457,14 @@ Or drag the photo onto the studio page.
 **Scout or DP fail**: the Director calls them through :3002/:3003, so check
 their session actors the same way as the Director's (TEMPLATE `default/scout-…`
 or `default/dp-…`).
+
+**A pod in `ImagePullBackOff` on `localhost:5001/...`** (viewfinder, the MCP
+servers): the node's containerd has no route to the registry. The cluster has
+to be created with `k8s/kind/kind-config.yaml` (phase 0), whose `certs.d`
+mount and `config_path` patch map `localhost:5001` to `kind-registry:5000`.
+Also check `docker network inspect kind | grep kind-registry` (phase 1).
+
+**An agent's template says `GoldenActorCrashed`**: see the end of phase 7.
 
 **Gateway logs full of `BatchSpanProcessor.ExportError`**: the collector is
 missing. Do phase 4.

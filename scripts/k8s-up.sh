@@ -130,21 +130,23 @@ fi
 k -n otel-system rollout status deploy/opentelemetry-collector --timeout=180s >/dev/null && echo "   collector ready"
 k -n otel-system rollout status deploy/jaeger --timeout=180s >/dev/null && echo "   jaeger ready"
 
-# Two settings `kagent install` leaves out of its Substrate release, added
+# Three settings `kagent install` leaves out of its Substrate release, added
 # with k8s/substrate-values.yaml (kagent's own values are kept):
 #   - the OTLP endpoint; without it the chart turns export off on the workers
+#   - atelet's localhost:5001 -> kind-registry:5000, or no actor image pulls
 #   - ate-system/atenet-client on the router's allowlist, for the studio's
 #     `kubectl ate proxy` (scripts/k8s-pf.sh)
 # Only when one is missing: the upgrade restarts the Substrate components
 # (atelet: on the node).
 OTLP_ENDPOINT=http://opentelemetry-collector.otel-system.svc:4317
 have=$(k -n ate-system get deploy/ate-controller -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="OTEL_EXPORTER_OTLP_ENDPOINT")].value}')
+registry=$(k -n ate-system get ds/atelet -o jsonpath='{.spec.template.spec.containers[0].args}' | grep -c 'localhost-registry-replacement=kind-registry:5000' || true)
 allowed=$(k -n ate-system get configmap atenet-router-agentgateway-config -o jsonpath='{.data}' | grep -c 'ns/ate-system/sa/atenet-client' || true)
-if [ "$have" != "$OTLP_ENDPOINT" ] || [ "${allowed:-0}" -eq 0 ]; then
+if [ "$have" != "$OTLP_ENDPOINT" ] || [ "${registry:-0}" -eq 0 ] || [ "${allowed:-0}" -eq 0 ]; then
   chart=$(helm --kube-context "$CTX" -n ate-system get metadata substrate -o json | python3 -c 'import sys,json; print(json.load(sys.stdin)["version"])')
   helm --kube-context "$CTX" -n ate-system upgrade substrate oci://ghcr.io/kagent-dev/substrate/helm/substrate \
     --version "$chart" --reuse-values -f k8s/substrate-values.yaml --wait --timeout 5m >/dev/null
-  echo "   substrate $chart: OTLP endpoint and studio proxy access set"
+  echo "   substrate $chart: OTLP endpoint, kind registry and studio proxy access set"
 fi
 
 echo "== keycloak (publish sign-in, namespace $MCP_NS)"
