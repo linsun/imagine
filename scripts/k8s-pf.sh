@@ -3,9 +3,11 @@
 #
 #   :3005  photo inbox, via agentgateway  -- on ALL interfaces, so the phone
 #          on the same wifi (or the laptop tethered to the phone) can reach it
-#   :3007  the studio, via agentgateway: the page (a Substrate actor that
-#          sleeps) and the Director at /director/, for the page and for
-#          ./imagine k8s demo
+#   :3007  the studio page: `kubectl ate proxy` to the studio actor, through
+#          atenet-router, which wakes it (Substrate v1's router takes only
+#          mTLS clients, so not via agentgateway)
+#   :3006  what the page calls, via agentgateway (with CORS): the Director at
+#          /director/ (also for ./imagine k8s demo), /photo/ and /stage/
 #   :8888  viewfinder: /stage for the projector, / for the live camera
 #   :3001  the MCP gateway (namespace mcp)
 #   :16686 Jaeger     :15000 agentgateway UI     :15001 MCP gateway UI
@@ -31,8 +33,19 @@ fwd() {  # name, address, namespace, target, ports
   echo $! > ".pids/pf-$name"
 }
 
+ate_proxy() {  # name, actor, ports -- like fwd, through atenet-router
+  local name=$1 actor=$2 ports=$3
+  ( while true; do
+      "${ATE_BIN:-kubectl-ate}" --context "$CTX" proxy actor "$actor" -a "$NS" $ports \
+        >>"logs/pf-$name.log" 2>&1 || true
+      sleep 1
+    done ) </dev/null >/dev/null 2>&1 &
+  echo $! > ".pids/pf-$name"
+}
+
 fwd photos   0.0.0.0   "$NS"   svc/agentgateway 3005:3005
-fwd studio   127.0.0.1 "$NS"   svc/agentgateway 3007:3007
+ate_proxy studio studio 3007:80
+fwd studio-api 127.0.0.1 "$NS" svc/agentgateway 3006:3006
 fwd stage    127.0.0.1 "$NS"   svc/viewfinder   8888:8888
 fwd jaeger   127.0.0.1 otel-system svc/jaeger   16686:16686    # Substrate's Jaeger
 fwd agw-ui   127.0.0.1 "$NS"   deploy/agentgateway 15000:15000
@@ -47,7 +60,7 @@ cat <<EOF
 
   stage (projector)   http://localhost:8888/stage     click once to arm sound
   live camera         http://localhost:8888/          Safari, for the iPhone
-  Director (terminal) ./imagine k8s demo       via :3007/director/
+  Director (terminal) ./imagine k8s demo       via :3006/director/
   studio (web)        http://localhost:3007/          wakes the studio actor; ./imagine k8s studio sleep
   agents (actors)     kubectl ate get actors -a default    workers: kubectl ate get workers
   traces              http://localhost:16686/     agents + gateway + Substrate itself

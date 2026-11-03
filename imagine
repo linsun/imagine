@@ -461,12 +461,12 @@ def cmd_k8s(args) -> int:
             return subprocess.call([ate, "--context", ctx, "get", "actors", "studio",
                                     "-a", "default"])
         return subprocess.call(["open", "http://localhost:3007/"])
-    # demo: the thin client -> agentgateway :3007/director/ (the studio's port,
-    # the same way in as the page) -> kagent -> the Director's actor, A2A v1
+    # demo: the thin client -> agentgateway :3006/director/ (the same way in as
+    # the studio page) -> kagent -> the Director's actor, A2A v1
     py = VENV_PY if os.path.exists(VENV_PY) else sys.executable
     return subprocess.call([py, "-m", "agent.client"], cwd=HERE,
                            env={**load_env(), "DIRECTOR_A2A_PROTOCOL": "v1",
-                                "DIRECTOR_A2A": "http://localhost:3007/director"})
+                                "DIRECTOR_A2A": "http://localhost:3006/director"})
 
 
 def main() -> int:

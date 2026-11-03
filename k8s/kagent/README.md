@@ -1,6 +1,6 @@
 # The agents as kagent Agents
 
-Director, Scout and DP run through kagent (kagent 1.0.0-alpha17,
+Director, Scout and DP run through kagent (kagent 1.0.0-rc1,
 `api.kagent.dev/v1alpha3`), in namespace `default`. kagent compiles each Agent
 into an ActorTemplate, starts one actor per session, and owns its lifecycle.
 
@@ -11,7 +11,7 @@ into an ActorTemplate, starts one actor per session, and owns its lifecycle.
 | `agents.yaml` | The three `Agent`s: a Harness + an inline description |
 
 The worker pool is `../workerpool.yaml` (2 workers, shared with the studio),
-and the routes to kagent's A2A endpoint (:3002, :3003, :3007/director/) are
+and the routes to kagent's A2A endpoint (:3002, :3003, :3006/director/) are
 `../gateway-api/agents.yaml`.
 
 ```bash
@@ -25,7 +25,7 @@ kubectl get agents,harnesses
 All three run `agent/kagent_runtime.py` (`python -m agent.kagent_runtime
 director|scout|dp`), from `Dockerfile.kagent`. It does what kagent expects of a
 BYO image (`go/core/internal/substrate/actor_template.go` and
-`go/core/internal/a2agateway/` at `v1.0.0-alpha17`):
+`go/core/internal/a2agateway/` at `v1.0.0-rc1`):
 
 1. **A2A v1 over gRPC on :80.** kagent's gateway dials the actor through
    `atenet-router`. The port comes from kagent's config.

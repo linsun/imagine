@@ -21,7 +21,7 @@ if [ "${1:-}" = "--purge" ]; then
   ate() { "${ATE_BIN:-kubectl-ate}" --context "$CTX" "$@"; }
   # The agents first, so kagent removes their actors and templates.
   k -n default delete -f k8s/kagent/agents.yaml -f k8s/kagent/harnesses.yaml -f k8s/kagent/egress-policy.yaml --ignore-not-found
-  ate delete actor studio -a default --any-state 2>/dev/null
+  ate delete actor studio -a default 2>/dev/null
   ate delete actor-template studio -a default 2>/dev/null
   k delete -f k8s/studio/routes.yaml -f k8s/gateway-api/ -f k8s/app.yaml -f k8s/workerpool.yaml --ignore-not-found
   k -n default delete secret provider-keys agw-virtual-key agw-publish-key photo-inbox-key --ignore-not-found

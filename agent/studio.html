@@ -127,6 +127,9 @@
 
 <script>
 const $ = (id) => document.getElementById(id);
+// This page comes from the actor (:3007, kubectl ate proxy). The Director,
+// the photo inbox and the stage are on the gateway's :3006, same host.
+const API = location.protocol + "//" + location.hostname + ":3006/";
 
 // ------------------------------------------------------------ the wake
 function ago(s) {
@@ -184,19 +187,19 @@ function show(kind, src, tag) {
 
 async function pollScreen() {
   try {
-    const st = await (await fetch("stage/state", {cache: "no-store"})).json();
+    const st = await (await fetch(API + "stage/state", {cache: "no-store"})).json();
     if (stageSeq !== null && st.seq !== stageSeq && st.kind) {
-      show(st.kind === "video" ? "video" : "image", "stage/media?" + st.seq,
+      show(st.kind === "video" ? "video" : "image", API + "stage/media?" + st.seq,
            st.caption || (st.kind === "video" ? "the film" : "on stage"));
     }
     stageSeq = st.seq;
   } catch {}
   if (showing !== "video") {
     try {
-      const p = await (await fetch("photo/latest", {cache: "no-store"})).json();
+      const p = await (await fetch(API + "photo/latest", {cache: "no-store"})).json();
       if (p.has_photo && p.received_at !== photoAt) {
         photoAt = p.received_at;
-        show("image", "photo/latest.jpg?" + photoAt, "latest photo");
+        show("image", API + "photo/latest.jpg?" + photoAt, "latest photo");
       }
     } catch {}
   }
@@ -212,7 +215,7 @@ addEventListener("drop", async (e) => {
   const f = [...e.dataTransfer.files].find((f) => f.type.startsWith("image/") || /\.hei[cf]$/i.test(f.name));
   if (!f) return;
   step("📤 sending " + f.name + " to the inbox");
-  const r = await fetch("photo/upload", {method: "POST", body: f,
+  const r = await fetch(API + "photo/upload", {method: "POST", body: f,
                                          headers: {"Content-Type": f.type || "image/heic"}});
   step(r.ok ? "📥 in the inbox: ask for your latest photo" : "! upload failed (" + r.status + ")", !r.ok);
   showing = ""; pollScreen();
@@ -416,7 +419,7 @@ async function ask(text, retried = false) {
   const message = {messageId: crypto.randomUUID(), role: "ROLE_USER", parts: [{text}]};
   if (ctx) message.contextId = ctx;
   try {
-    const r = await fetch("director/", {
+    const r = await fetch(API + "director/", {
       method: "POST",
       headers: {"Content-Type": "application/json", "Accept": "text/event-stream", "A2A-Version": "1.0",
                 ...(bearer ? {"Authorization": "Bearer " + bearer} : {})},

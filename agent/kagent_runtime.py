@@ -2,7 +2,7 @@
 
 kagent runs each Agent as an Agent Substrate actor, one actor per session
 (A2A contextId), and expects four things of a BYO image (kagent
-v1.0.0-alpha17, go/core/internal/substrate/actor_template.go):
+v1.0.0-rc1, go/core/internal/substrate/actor_template.go):
 
   A2A v1 over gRPC on :80   kagent's A2A gateway dials the actor through
                             atenet-router with the gRPC binding

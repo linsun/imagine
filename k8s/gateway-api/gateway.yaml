@@ -15,10 +15,10 @@
 #   models.yaml        :3000 the LLMs (Gemini, OpenAI fallback, image model)
 #   llm-policy.yaml    :3000 who may call the LLMs (the agents' virtual key)
 #   token-limit.yaml   :3000 how many tokens they get -- the demo knob
-#   agents.yaml        :3002 Scout, :3003 DP, :3007/director/ (kagent Agents)
+#   agents.yaml        :3002 Scout, :3003 DP, :3006/director/ (kagent Agents)
 #   github.yaml        :3004 GitHub, with the real token swapped in
 #   photos.yaml        :3005 the photo inbox for the phone
-#   ../studio/routes.yaml  :3007 the studio page (applied with the studio actor)
+#   ../studio/routes.yaml  :3006 what the studio page calls, with CORS
 ---
 # How the controller should run this Gateway's proxy.
 apiVersion: agentgateway.dev/v1alpha1
@@ -81,9 +81,10 @@ spec:
   - {name: dp, port: 3003, protocol: HTTP, allowedRoutes: {namespaces: {from: Same}}}
   - {name: github, port: 3004, protocol: HTTP, allowedRoutes: {namespaces: {from: Same}}}
   - {name: photos, port: 3005, protocol: HTTP, allowedRoutes: {namespaces: {from: Same}}}
-  # The studio page (k8s/studio/), a Substrate actor that sleeps until opened,
-  # and the Director at /director/ (agents.yaml).
-  - {name: studio, port: 3007, protocol: HTTP, allowedRoutes: {namespaces: {from: Same}}}
+  # What the studio page calls (it is served on :3007 by `kubectl ate proxy`,
+  # not by this gateway): the Director at /director/ (agents.yaml), /photo/
+  # and /stage/ (../studio/routes.yaml).
+  - {name: studio-api, port: 3006, protocol: HTTP, allowedRoutes: {namespaces: {from: Same}}}
 ---
 # Gateway-wide: tracing and the body buffer.
 apiVersion: agentgateway.dev/v1alpha1

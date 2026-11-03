@@ -130,22 +130,22 @@ fi
 k -n otel-system rollout status deploy/opentelemetry-collector --timeout=180s >/dev/null && echo "   collector ready"
 k -n otel-system rollout status deploy/jaeger --timeout=180s >/dev/null && echo "   jaeger ready"
 
-# Substrate's own telemetry. The alpha3 release sets no OTLP endpoint (newer
-# installs get it from the `ate-otel-config` ConfigMap), so the controller,
-# the API server, atelet and every worker export to localhost:4317 and log
-# "OpenTelemetry SDK error". Set it on the three that export: ate-controller
-# copies it onto the worker pods it creates, and atelet then serves the OTLP
-# relay socket the workers send through. Only changed when it differs, since
-# each change restarts that component (atelet: on the node).
+# Two settings `kagent install` leaves out of its Substrate release, added
+# with k8s/substrate-values.yaml (kagent's own values are kept):
+#   - the OTLP endpoint; without it the chart turns export off on the workers
+#   - ate-system/atenet-client on the router's allowlist, for the studio's
+#     `kubectl ate proxy` (scripts/k8s-pf.sh)
+# Only when one is missing: the upgrade restarts the Substrate components
+# (atelet: on the node).
 OTLP_ENDPOINT=http://opentelemetry-collector.otel-system.svc:4317
-for w in deploy/ate-controller deploy/ate-api-server ds/atelet; do
-  have=$(k -n ate-system get "$w" -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="OTEL_EXPORTER_OTLP_ENDPOINT")].value}')
-  if [ "$have" != "$OTLP_ENDPOINT" ]; then
-    k -n ate-system set env "$w" OTEL_EXPORTER_OTLP_ENDPOINT="$OTLP_ENDPOINT" >/dev/null
-    k -n ate-system rollout status "$w" --timeout=180s >/dev/null
-    echo "   substrate $w: OTLP endpoint set"
-  fi
-done
+have=$(k -n ate-system get deploy/ate-controller -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="OTEL_EXPORTER_OTLP_ENDPOINT")].value}')
+allowed=$(k -n ate-system get configmap atenet-router-agentgateway-config -o jsonpath='{.data}' | grep -c 'ns/ate-system/sa/atenet-client' || true)
+if [ "$have" != "$OTLP_ENDPOINT" ] || [ "${allowed:-0}" -eq 0 ]; then
+  chart=$(helm --kube-context "$CTX" -n ate-system get metadata substrate -o json | python3 -c 'import sys,json; print(json.load(sys.stdin)["version"])')
+  helm --kube-context "$CTX" -n ate-system upgrade substrate oci://ghcr.io/kagent-dev/substrate/helm/substrate \
+    --version "$chart" --reuse-values -f k8s/substrate-values.yaml --wait --timeout 5m >/dev/null
+  echo "   substrate $chart: OTLP endpoint and studio proxy access set"
+fi
 
 echo "== keycloak (publish sign-in, namespace $MCP_NS)"
 # The realm seed holds a user's password hash, so it stays out of git
@@ -184,17 +184,17 @@ version=$(k -n ate-system get deploy ate-controller -o jsonpath='{.spec.template
 export WORKER_IMAGE=${WORKER_IMAGE:-ghcr.io/kagent-dev/substrate/ateworker-gvisor:$version}
 envsubst '${WORKER_IMAGE}' < k8s/workerpool.yaml | k apply -f - >/dev/null
 # Workers made before the controller had the OTLP endpoint (above) keep
-# exporting to localhost. Replace them -- but not under a RUNNING actor, which
-# would die with its worker; then say how to do it later.
-stale=$(k -n "$NS" get pods -l ate.dev/worker-pool=imagine -o jsonpath='{range .items[*]}{.metadata.name}={.spec.containers[0].env[?(@.name=="OTEL_EXPORTER_OTLP_ENDPOINT")].value}{"\n"}{end}' \
-  | awk -F= -v want="$OTLP_ENDPOINT" '$2 != want {print $1}')
+# OTEL_TRACES_EXPORTER=none. Replace them -- but not under a RUNNING actor,
+# which would die with its worker; then say how to do it later.
+stale=$(k -n "$NS" get pods -l ate.dev/worker-pool=imagine -o jsonpath='{range .items[*]}{.metadata.name}={.spec.containers[0].env[?(@.name=="OTEL_TRACES_EXPORTER")].value}{"\n"}{end}' \
+  | awk -F= '$2 != "otlp" {print $1}')
 if [ -n "$stale" ]; then
   running=$(ate get actors -a "$NS" 2>/dev/null | grep -c ACTOR_STATE_RUNNING || true)
   if [ "${running:-0}" -eq 0 ]; then
     echo "   replacing $(echo $stale | wc -w | tr -d ' ') worker(s) to pick up the OTLP endpoint"
     k -n "$NS" delete pod $stale --timeout=120s >/dev/null   # gone before the ready count below
   else
-    echo "   workers still export to localhost, but $running actor(s) are RUNNING; once they're suspended:"
+    echo "   workers have OTLP export off, but $running actor(s) are RUNNING; once they're suspended:"
     echo "     kubectl --context $CTX -n $NS delete pods -l ate.dev/worker-pool=imagine"
   fi
 fi
@@ -219,11 +219,13 @@ for agent in $AGENTS; do
 done
 
 echo "== studio (a raw actor in atespace $NS, beside kagent's)"
-# The page at :3007. Not a kagent Agent: one actor, woken by any request,
-# asleep until then. No egress: the browser fetches everything through the
-# gateway on the same port.
+# The page at :3007 (`kubectl ate proxy`, scripts/k8s-pf.sh). Not a kagent
+# Agent: one actor, woken by any request, asleep until then. No egress: the
+# browser fetches the rest from the gateway's :3006, with CORS.
 ate get atespaces "$NS" >/dev/null 2>&1 || ate create atespace "$NS" >/dev/null
 k apply -f k8s/studio/routes.yaml >/dev/null
+# Left over from Substrate v0.6, when the gateway sent :3007 to atenet-router.
+k -n ate-system delete referencegrant imagine-studio --ignore-not-found >/dev/null
 
 # Templates are immutable: (re)create the template when it changed, and the
 # actor when it is missing. A new actor starts SUSPENDED on its golden
@@ -242,7 +244,7 @@ env = {e["name"]: e.get("value", "") for e in t["containers"][0].get("env", [])}
 print("failed" if golden.get("errorMessage") else env.get("TEMPLATE_HASH", "none"))' 2>/dev/null || true)
 if [ "$current" != "$want" ]; then
   if [ -n "$current" ]; then
-    ate delete actor studio -a "$NS" --any-state >/dev/null 2>&1 || true
+    ate delete actor studio -a "$NS" >/dev/null 2>&1 || true
     ate delete actor-template studio -a "$NS" >/dev/null
   fi
   render "$want" | ate create actor-template -f - >/dev/null

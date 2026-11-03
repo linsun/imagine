@@ -1,20 +1,21 @@
 """The studio: the keynote's web page, served by an Agent Substrate actor.
 
 The page only runs while someone is looking at it. The actor sits suspended
-(a snapshot, no worker) until a browser opens :3007; atenet-router wakes it
-for that request, and `./imagine k8s studio sleep` puts it back. Because the
-snapshot keeps process memory, the server notices the gap in its own clock
-when it is resumed, and the page says how long it slept -- the wake is the
-first thing the audience sees.
+(a snapshot, no worker) until a browser opens :3007, which `kubectl ate proxy`
+forwards through atenet-router; the router wakes it for that request, and
+`./imagine k8s studio sleep` puts it back. Because the snapshot keeps process
+memory, the server notices the gap in its own clock when it is resumed, and
+the page says how long it slept -- the wake is the first thing the audience
+sees.
 
-Everything else on the page goes through agentgateway on the same port, so the
-browser has one origin and the actor needs no egress at all:
+The actor serves only the page. Everything else the page calls is on
+agentgateway's :3006 (with CORS), so the actor needs no egress at all:
 
-  /            this page            (the actor, via atenet-router)
-  /api/self    when it woke, how long it slept
-  /director/   the Director, A2A v1 (kagent)
-  /photo/...   the photo inbox      (viewfinder)
-  /stage/...   what is on the projector
+  :3007 /            this page            (the actor)
+  :3007 /api/self    when it woke, how long it slept
+  :3006 /director/   the Director, A2A v1 (kagent)
+  :3006 /photo/...   the photo inbox      (viewfinder)
+  :3006 /stage/...   what is on the projector
 
   python -m agent.studio            # PORT=80 in the actor; 8090 by default
 """

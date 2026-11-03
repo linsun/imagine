@@ -6,7 +6,7 @@ When a turn puts something new on the stage -- the photo, or the film -- its
 URL is opened in your browser, which shows it (and plays the film). When the Director opens the camera, the live
 preview is opened too (in PREVIEW_BROWSER if set -- Safari, for the iPhone).
 
-  DIRECTOR_A2A=http://localhost:3007/director python -m agent.client
+  DIRECTOR_A2A=http://localhost:3006/director python -m agent.client
 
 With the Director on kagent (k8s/kagent/), set DIRECTOR_A2A_PROTOCOL=v1: the
 same turn as an A2A v1 SendStreamingMessage. kagent assigns the contextId (it
@@ -25,7 +25,7 @@ import httpx
 
 from agent import auth
 
-URL = os.environ.get("DIRECTOR_A2A", "http://localhost:3007/director").rstrip("/") + "/"
+URL = os.environ.get("DIRECTOR_A2A", "http://localhost:3006/director").rstrip("/") + "/"
 # "v1" for the Director on kagent (./imagine k8s demo sets it); 0.3 on the laptop.
 PROTOCOL = os.environ.get("DIRECTOR_A2A_PROTOCOL") or "0.3"
 STAGE = os.environ.get("STAGE_URL", "http://localhost:8888").rstrip("/")

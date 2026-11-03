@@ -11,7 +11,7 @@ Where things live:
 
 | Namespace | What |
 | --- | --- |
-| `default` | agentgateway (LLMs :3000, Scout :3002, DP :3003, GitHub :3004, photos :3005, studio and Director :3007), the viewfinder, the worker pool, the kagent Agents, and atespace `default` with every actor |
+| `default` | agentgateway (LLMs :3000, Scout :3002, DP :3003, GitHub :3004, photos :3005, studio's API and Director :3006), the viewfinder, the worker pool, the kagent Agents, and atespace `default` with every actor |
 | `mcp` | the MCP gateway (:3001), the five MCP servers, Keycloak |
 | `otel-system` | the OTel collector and Jaeger |
 
@@ -46,11 +46,11 @@ set -a; . ./.env; set +a          # GEMINI_API_KEY, AGW_VIRTUAL_KEY, PHOTO_INBOX
 export CTX=kind-kagent NS=default MCP_NS=mcp REG=localhost:5001
 ```
 
-`kubectl ate` is the plugin at `/usr/local/bin/kubectl-ate`. It must be
-built from the same Substrate tag as the cluster (v0.6.0-alpha3). The scripts
-use the `kubectl-ate` on PATH (override with `ATE_BIN`). Don't use the
-substrate checkout's `bin/kubectl-ate`: it's a newer build, and the cluster
-answers it with "Unimplemented".
+`kubectl ate` is the plugin at `/usr/local/bin/kubectl-ate`. It must come
+from the same Substrate release as the cluster: kagent 1.0.0-rc1 installs
+kagent-dev/substrate v1.0.0-rc1, so take `kubectl-ate-darwin-arm64` from that
+release (not agent-substrate/substrate). The scripts use the `kubectl-ate` on
+PATH (override with `ATE_BIN`). A mismatched plugin gets "Unimplemented".
 
 ## 1. Preflight: are the platforms there?
 
@@ -175,29 +175,32 @@ kubectl --context $CTX apply -f ~/src/github.com/linsun/substrate/manifests/ate-
 kubectl --context $CTX -n otel-system rollout status deploy/opentelemetry-collector deploy/jaeger --timeout=180s
 ```
 
-Substrate itself needs to be told where the collector is. The alpha3 release
-sets no OTLP endpoint (newer installs get it from an `ate-otel-config`
-ConfigMap), so `ate-controller`, `ate-api-server`, `atelet` and every worker
-pod export to `localhost:4317` and log `OpenTelemetry SDK error`. Set it on
-the three components. The controller copies it onto the worker pods it makes,
-and atelet then serves the OTLP relay socket the workers send through:
+Substrate itself needs to be told where the collector is. `kagent install`
+sets no OTLP endpoint, so the chart turns export off on the workers
+(`OTEL_*_EXPORTER=none`) and Jaeger never shows an actor. Add the endpoint to
+the Substrate Helm release, keeping kagent's values (`k8s/substrate-values.yaml`
+also samples every trace instead of 1%):
 
 ```bash
-kubectl --context $CTX -n ate-system set env deploy/ate-controller deploy/ate-api-server ds/atelet \
-  OTEL_EXPORTER_OTLP_ENDPOINT=http://opentelemetry-collector.otel-system.svc:4317
+helm --kube-context $CTX -n ate-system upgrade substrate oci://ghcr.io/kagent-dev/substrate/helm/substrate \
+  --version 1.0.0-rc1 --reuse-values -f k8s/substrate-values.yaml --wait
 ```
 
-Workers that already exist keep the old setting until they're replaced. The
-script deletes them in phase 7 when they lack the endpoint, unless an actor
-is RUNNING (it would die with its worker); then it prints the command to run
-later. Check a worker with:
+Don't `kubectl set env` the components instead: the chart's worker setting
+stays `none`, and the next Helm upgrade reverts it.
+
+Workers that already exist keep `none` until they're replaced. The script
+deletes them in phase 7 when they do, unless an actor is RUNNING (it would die
+with its worker); then it prints the command to run later. Check the workers
+with (`otlp` is the good answer):
 
 ```bash
-kubectl --context $CTX -n $NS logs -l ate.dev/worker-pool=imagine --tail=200 | grep -E "OTLP relay|OpenTelemetry SDK error"
+kubectl --context $CTX -n $NS get pods -l ate.dev/worker-pool=imagine \
+  -o jsonpath='{range .items[*]}{.metadata.name} {.spec.containers[0].env[?(@.name=="OTEL_TRACES_EXPORTER")].value}{"\n"}{end}'
 ```
 
-"Exporting telemetry through the atelet OTLP relay" is the good answer. A
-Substrate reinstall drops the setting; `./imagine k8s up` puts it back.
+A `kagent install` (reinstall or upgrade) drops the setting; `./imagine k8s up`
+puts it back.
 
 ## 5. Keycloak (sign-in for "publish")
 
@@ -273,7 +276,7 @@ to get the new code.
 
 ```bash
 kubectl ate --context $CTX get atespaces $NS || kubectl ate --context $CTX create atespace $NS
-kubectl --context $CTX apply -f k8s/studio/routes.yaml                                        # :3007 -> actor, /photo/, /stage/
+kubectl --context $CTX apply -f k8s/studio/routes.yaml                                        # :3006 /photo/, /stage/, CORS
 ```
 
 Templates are **immutable**: to change one, delete the actor and the template,
@@ -281,7 +284,7 @@ then recreate both. The script does this only when the rendered template's
 hash changed. By hand:
 
 ```bash
-kubectl ate --context $CTX delete actor studio -a $NS --any-state       # only if replacing
+kubectl ate --context $CTX delete actor studio -a $NS       # only if replacing
 kubectl ate --context $CTX delete actor-template studio -a $NS          # only if replacing
 
 IMAGE=$STUDIO_IMAGE TEMPLATE_HASH=manual envsubst '${IMAGE} ${TEMPLATE_HASH}' < k8s/studio/studio.yaml \
@@ -294,7 +297,7 @@ kubectl ate --context $CTX create actor studio -a $NS --template studio
 ```
 
 A new actor starts **SUSPENDED** on the golden snapshot. That's correct: the
-first request to :3007 wakes it.
+first request to :3007 (the proxy, phase 9) wakes it.
 
 ## 9. Port-forwards
 
@@ -304,7 +307,8 @@ in a restart loop, in the background. Logs go to `logs/pf-<name>.log`.
 | Laptop | Target | What |
 | --- | --- | --- |
 | 0.0.0.0:3005 | svc/agentgateway | photo inbox (the phone uses this over wifi) |
-| :3007 | svc/agentgateway | the studio page, and the Director at `/director/` (also `./imagine k8s demo`) |
+| :3007 | actor default/studio | the studio page, via `kubectl ate proxy` through atenet-router |
+| :3006 | svc/agentgateway | what the page calls: the Director at `/director/` (also `./imagine k8s demo`), `/photo/`, `/stage/` |
 | :3001 | mcp svc/mcp-gateway | the MCP endpoint (the gateway UI's playground) |
 | :8888 | svc/viewfinder | `/stage` on the projector |
 | :16686 | otel-system svc/jaeger | traces |
@@ -315,8 +319,13 @@ in a restart loop, in the background. Logs go to `logs/pf-<name>.log`.
 A single forward, by hand:
 
 ```bash
-kubectl --context $CTX -n $NS port-forward svc/agentgateway 3007:3007
+kubectl --context $CTX -n $NS port-forward svc/agentgateway 3006:3006
+kubectl ate --context $CTX proxy actor studio -a $NS 3007:80
 ```
+
+The proxy needs `spiffe://cluster.local/ns/ate-system/sa/atenet-client` on
+the router's allowlist (phase 4's Helm upgrade, `k8s/substrate-values.yaml`).
+Without it every request fails with a CONNECT error in `logs/pf-studio.log`.
 
 ---
 
@@ -354,7 +363,8 @@ kubectl ate --context $CTX suspend actor <session-…> -a $NS
 Follow the request's path. Each hop has its own check:
 
 ```
-browser :3007 ─▶ port-forward ─▶ agentgateway ─┬─▶ atenet-router ─▶ studio actor
+browser :3007 ─▶ kubectl ate proxy ─▶ atenet-router ─▶ studio actor
+browser :3006 ─▶ port-forward ─▶ agentgateway ─┬
                                 (default)      ├─▶ kagent-controller ─▶ Director actor ─┬─▶ :3000 LLM ─▶ Gemini
                                                │                                        ├─▶ mcp-gateway :3001 (mcp) ─▶ camera/vision/post/stage/publish-mcp
                                                │                                        └─▶ :3002/:3003 ─▶ kagent ─▶ Scout/DP actors
@@ -365,7 +375,7 @@ browser :3007 ─▶ port-forward ─▶ agentgateway ─┬─▶ atenet-router
 
 ```bash
 curl -s localhost:3007/api/self                                              # page server alive?
-cat logs/pf-studio.log | tail                                                # forward dropped?
+cat logs/pf-studio.log | tail                                                # proxy dropped, or CONNECT refused (allowlist)?
 kubectl ate --context $CTX get actors studio -a $NS                          # SUSPENDED is fine (the request wakes it); CRASHED is not
 kubectl --context $CTX -n ate-system logs deploy/atenet-router --tail=50     # wake/routing errors
 kubectl ate --context $CTX logs actor studio -a $NS --source lifecycle       # resume history
@@ -411,7 +421,7 @@ kubectl --context $CTX -n $MCP_NS rollout restart deploy/vision-mcp          # r
 **"No photo in the inbox yet"**
 
 ```bash
-curl -s localhost:3007/photo/latest                                          # has_photo, age_s
+curl -s localhost:3006/photo/latest                                          # has_photo, age_s
 PHOTO_MATCH='.*' scripts/send-photo.sh                                       # newest file in ~/Downloads
 ```
 
@@ -424,6 +434,6 @@ or `default/dp-…`).
 **Gateway logs full of `BatchSpanProcessor.ExportError`**: the collector is
 missing. Do phase 4.
 
-**Worker, ate-controller or atelet logs full of `OpenTelemetry SDK error ...
-dial tcp [::1]:4317`**: Substrate has no OTLP endpoint. Do the second half of
-phase 4, then replace the workers once no actor is RUNNING.
+**No Substrate spans in Jaeger (only the gateways and the Director)**:
+Substrate has no OTLP endpoint. Do the second half of phase 4, then replace
+the workers once no actor is RUNNING.

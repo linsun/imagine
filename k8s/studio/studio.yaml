@@ -28,13 +28,11 @@ containers:
   - {name: PORT, value: "80"}
   wakeupProbe:
     httpGet: {path: /healthz, port: 80}
-# Substrate v0.6: a list of {name, quantity}, as in Kubernetes quantities.
+# Substrate v1: plain numbers, 500m CPU and 256Mi memory.
 resources:
-  limits:
-  - {name: cpu, quantity: 500m}
-  - {name: memory, quantity: 256Mi}
+  limits: {cpuMillicores: 500, memoryBytes: 268435456}
 # MEMORY fidelity: a resume continues the same process, so the server sees the
-# gap in its own clock and the page can say how long it slept.
+# gap in its own clock and the page can say how long it slept. Snapshots go to
+# the API server's default location (ATE_API_SNAPSHOT_LOCATION).
 snapshotConfig:
-  storageLocation: gs://ate-snapshots/imagine/
   preferredFidelity: SNAPSHOT_FIDELITY_MEMORY

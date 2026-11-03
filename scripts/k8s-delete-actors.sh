@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Empty an atespace (default: imagine, the old namespace's): every actor,
+# Empty an atespace (default: default): every actor,
 # whatever its state, with its egress policy, then every actor template.
 # Lists them and asks first; -y skips the ask.
 #
-#   scripts/k8s-delete-actors.sh              # atespace imagine
-#   scripts/k8s-delete-actors.sh default -y   # atespace default, no prompt
+#   scripts/k8s-delete-actors.sh              # atespace default
+#   scripts/k8s-delete-actors.sh imagine -y   # atespace imagine, no prompt
 #   scripts/k8s-delete-actors.sh --actors-only
 #
 # Delete the kagent Agents in that namespace first, or kagent puts new
@@ -70,7 +70,7 @@ if [ "$na" -gt 0 ]; then
       echo "FAILED  egress policy $name: $(grep -v '^Warning' <<< "$out" | tail -1)"
       failed=$((failed + 1))
     fi
-    if ate delete actor "$name" -a "$ATESPACE" --any-state >/dev/null 2>&1; then
+    if ate delete actor "$name" -a "$ATESPACE" >/dev/null 2>&1; then
       echo "deleted actor $name"
     else
       echo "FAILED  actor $name"; failed=$((failed + 1))

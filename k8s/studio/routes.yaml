@@ -1,25 +1,15 @@
-# :3007, the studio. One origin for the whole page, so the browser needs no
-# CORS and the actor needs no egress:
+# :3006, what the studio page calls. The page itself is on :3007, served by
+# `kubectl ate proxy actor studio` (scripts/k8s-pf.sh) through atenet-router,
+# which wakes the actor; this gateway can't reach the router, which on Substrate
+# v1 takes only mTLS clients on its allowlist. So the page calls a second
+# origin, and this port allows it with CORS:
 #
-#   /            the page          -> atenet-router, which wakes default/studio
 #   /photo/...   the photo inbox   -> viewfinder (/latest, /latest.jpg, /upload)
 #   /stage/...   the projector     -> viewfinder (/stage/state, /stage/media)
 #   /director/   the Director      -> kagent (in ../gateway-api/agents.yaml)
 #
 # Only port-forwarded to 127.0.0.1 (scripts/k8s-pf.sh), so these routes carry
 # no inbox key: the page is for the laptop on stage, not the venue wifi.
----
-# Lets the route in `default` send traffic to atenet-router in `ate-system`.
-apiVersion: gateway.networking.k8s.io/v1beta1
-kind: ReferenceGrant
-metadata:
-  name: imagine-studio
-  namespace: ate-system
-spec:
-  from:
-  - {group: gateway.networking.k8s.io, kind: HTTPRoute, namespace: default}
-  to:
-  - {group: "", kind: Service, name: atenet-router}
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -28,19 +18,8 @@ metadata:
   namespace: default
 spec:
   parentRefs:
-  - {name: agentgateway, sectionName: studio}
+  - {name: agentgateway, sectionName: studio-api}
   rules:
-  # Plain HTTP to the actor (not the A2A backend the agents use): it's a page.
-  # The first request after a sleep waits for the resume.
-  - filters:
-    - type: RequestHeaderModifier
-      requestHeaderModifier:
-        set:
-        - {name: ate-target-actor, value: default/studio}
-    backendRefs:
-    - {kind: Service, name: atenet-router, namespace: ate-system, port: 80}
-    timeouts:
-      request: 120s
   - matches: [{path: {type: PathPrefix, value: /photo/}}]
     filters:
     - type: URLRewrite
@@ -51,3 +30,21 @@ spec:
   - matches: [{path: {type: PathPrefix, value: /stage/}}]
     backendRefs:
     - {name: viewfinder, port: 8888}
+---
+# The page's origin may call :3006. Authorization carries the publish sign-in;
+# A2A-Version and Accept go with each Director call; Content-Type with a JSON
+# call or a photo upload.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: studio-cors
+  namespace: default
+spec:
+  targetRefs:
+  - {group: gateway.networking.k8s.io, kind: Gateway, name: agentgateway, sectionName: studio-api}
+  traffic:
+    cors:
+      allowOrigins: ["http://localhost:3007", "http://127.0.0.1:3007"]
+      allowHeaders: [Authorization, Content-Type, Accept, A2A-Version]
+      allowMethods: [GET, POST]
+      maxAge: 600

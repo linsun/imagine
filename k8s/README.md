@@ -6,8 +6,8 @@ while they're being asked something, and the photo comes from your phone
 
 ```
  phone ──(wifi)──▶ agentgateway :3005 ─▶ viewfinder (photo inbox + /stage page)
- browser ────────▶ agentgateway :3007 ─▶ atenet-router ── wakes ──▶ studio actor
- studio page, ./imagine k8s demo ▶ :3007/director/ ─▶ kagent ─▶ Director actor
+ browser :3007 ──▶ kubectl ate proxy ─▶ atenet-router ── wakes ──▶ studio actor
+ studio page, ./imagine k8s demo ▶ agentgateway :3006/director/ ─▶ kagent ─▶ Director actor
                                                          │
      Director ─▶ agentgateway :3000 LLM ─▶ Gemini        │  namespace default
      Director ─▶ agentgateway :3002/:3003 ─▶ kagent ─▶ Scout, DP actors
@@ -37,9 +37,10 @@ while they're being asked something, and the photo comes from your phone
 | --- | --- |
 | `app.yaml` | The viewfinder (`default`) |
 | `workerpool.yaml` | The one WorkerPool, `imagine`: 2 gVisor workers for every actor |
+| `substrate-values.yaml` | Helm values added to kagent's Substrate release: the OTLP endpoint |
 | `gateway-api/` | agentgateway (`default`), through the Gateway API: LLMs, agents, GitHub, photos, studio |
 | `kagent/` | Director, Scout and DP as kagent Agents (`Dockerfile.kagent`); see `kagent/README.md` |
-| `studio/` | The web page at :3007, a raw Substrate actor that sleeps until opened; see `studio/README.md` |
+| `studio/` | The web page at :3007 (`kubectl ate proxy`), a raw Substrate actor that sleeps until opened; see `studio/README.md` |
 | `mcp/` | Namespace `mcp`: the MCP gateway (`gateway.yaml`), the MCP servers (`servers.yaml`), Keycloak |
 | `RUNBOOK.md` | What `./imagine k8s up` does, step by step, and what to check when something fails on stage |
 
@@ -47,10 +48,10 @@ while they're being asked something, and the photo comes from your phone
 
 Prerequisites:
 - the kind cluster from `kind/`
-- Substrate from github.com/linsun/substrate:
-  `hack/install-ate-kind.sh --atenet-dataplane=agentgateway --deploy-ate-system`
+- kagent 1.0.0-rc1 with Substrate v1.0.0-rc1, both from `kagent install`
+  (the kagent CLI from the kagent-dev/kagent v1.0.0-rc1 release)
+- `kubectl-ate` from kagent-dev/substrate v1.0.0-rc1, on PATH
 - the Gateway API and agentgateway's controller: `scripts/k8s-install-agentgateway.sh`
-- kagent 1.0.0-alpha17
 
 ```bash
 ./imagine k8s up          # build, push, deploy everything, port-forwards
@@ -65,9 +66,9 @@ Options:
 - `AGENTS="scout"` waits only for those Agents.
 
 `k8s-up.sh` also installs Substrate's OTel collector and Jaeger
-(`otel-system`) when they're missing, and points Substrate's controller, API
-server and atelet at it (`OTEL_EXPORTER_OTLP_ENDPOINT`), which the workers then
-inherit. The release install of Substrate leaves both out.
+(`otel-system`) when they're missing, and points Substrate at it with a Helm
+upgrade of kagent's Substrate release (`substrate-values.yaml`, `otel.endpoint`).
+`kagent install` leaves both out.
 
 ## The token limit (demo)
 
@@ -137,8 +138,9 @@ wins. The Director needn't be running when the photo arrives.
 - **Images must be pinned by digest.** `k8s-up.sh` pushes to
   `localhost:5001` and resolves the digest.
 - **Only literal env values.** Nothing secret goes in a template.
-- **Match the `kubectl-ate` build to the cluster.** An older plugin lacks
-  newer commands; `k8s-up.sh` builds one from the substrate checkout.
+- **Match the `kubectl-ate` build to the cluster.** A plugin from another
+  Substrate release gets "Unimplemented"; `k8s-up.sh` stops early if it can't
+  list atespaces.
 - **Never suspend mid-turn.** A suspend cuts in-flight requests, and a film
   turn takes about 2 minutes.
 

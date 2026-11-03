@@ -15,9 +15,9 @@ it. The first request wakes it, and the page opens by saying how long it slept.
 | File | What |
 | --- | --- |
 | `studio.yaml` | The ActorTemplate: `python -m agent.studio` on :80, MEMORY snapshots |
-| `routes.yaml` | :3007 → the actor (via atenet-router), `/photo/` and `/stage/` → viewfinder |
+| `routes.yaml` | agentgateway :3006: `/photo/` and `/stage/` → viewfinder, plus CORS for the page |
 
-`/director/` on the same port goes to kagent; that route is in
+`/director/` on :3006 goes to kagent; that route is in
 `../gateway-api/agents.yaml`. The actor runs on the same 2 workers as the
 agents (`../workerpool.yaml`).
 
@@ -38,18 +38,25 @@ A thread ticks every second; a gap of more than 5 s in the wall clock means the
 process wasn't running. `/api/self` reports the last gap, and the page shows it
 along with how long the browser waited for the page (the wake itself).
 
-## Same origin, no egress
+## Two ports, no egress
 
-Everything the page needs goes through agentgateway on :3007, so the browser
-needs no CORS and the actor needs no egress policy (Substrate denies all egress
-by default):
+On Substrate v1, atenet-router takes only mTLS clients on its allowlist, so
+agentgateway can't send the browser to the actor. The page comes from
+`kubectl ate proxy actor studio -a default 3007:80` (`scripts/k8s-pf.sh`),
+which mints a client certificate for `ate-system/atenet-client` and opens a
+CONNECT tunnel through the router per connection; the router wakes the actor.
+`k8s/substrate-values.yaml` puts that identity on the router's allowlist.
 
-- `/`, `/api/self`: the actor
-- `/director/`: the Director, A2A v1 JSON-RPC (kagent)
-- `/photo/latest`, `/photo/latest.jpg`, `/photo/upload`: the photo inbox. You can drop a photo on the page.
-- `/stage/state`, `/stage/media`: what's on the projector, so the film plays on the page too
+The page calls everything else on agentgateway's :3006, which allows the
+page's origin with CORS (`studio-cors` in `routes.yaml`). The actor needs no
+egress policy (Substrate denies all egress by default):
 
-:3007 is port-forwarded to 127.0.0.1 only, so these routes carry no inbox key.
+- :3007 `/`, `/api/self`: the actor
+- :3006 `/director/`: the Director, A2A v1 JSON-RPC (kagent)
+- :3006 `/photo/latest`, `/photo/latest.jpg`, `/photo/upload`: the photo inbox. You can drop a photo on the page.
+- :3006 `/stage/state`, `/stage/media`: what's on the projector, so the film plays on the page too
+
+Both ports are forwarded to 127.0.0.1 only, so these routes carry no inbox key.
 
 ## Signing in to publish
 
