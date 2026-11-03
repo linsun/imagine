@@ -71,7 +71,12 @@ if [ -z "${SKIP_BUILD:-}" ]; then
   # and the agents behind kagent's BYO contract (agent/kagent_runtime.py).
   # The pod has no macOS `say`: record the film's spoken lines here, with the
   # real voice, and bake them into the image (servers/post_mcp.py VOICE_DIR).
-  .venv/bin/python -m servers.post_mcp --render-voices 2>/dev/null
+  [ -x .venv/bin/python ] || {
+    echo "no .venv in $PWD (it is not in git). Make one:"
+    echo "  python3 -m venv .venv && .venv/bin/pip install -r servers/requirements.txt"
+    exit 1; }
+  .venv/bin/python -m servers.post_mcp --render-voices >/dev/null \
+    || { echo "recording the film's voices failed (above)"; exit 1; }
   docker build -q --platform linux/arm64 -t $REG/imagine-keynote:dev . >/dev/null
   docker build -q --platform linux/arm64 -f Dockerfile.agents -t $REG/imagine-agents:dev . >/dev/null
   docker build -q --platform linux/arm64 -f Dockerfile.kagent -t $REG/imagine-agents-kagent:dev . >/dev/null
