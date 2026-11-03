@@ -170,6 +170,9 @@ k apply -f k8s/gateway-api/ -f k8s/mcp/gateway.yaml >/dev/null
 k -n "$NS" delete httproute photo-upload photo-inbox-page --ignore-not-found >/dev/null
 k -n "$NS" delete agentgatewaypolicy photo-upload-access --ignore-not-found >/dev/null
 k -n "$NS" delete secret photo-inbox-key --ignore-not-found >/dev/null
+# Once only: the viewfinder's old photo volume. The photos now live in the pod,
+# so a restart clears them.
+k -n "$NS" delete pvc inbox --ignore-not-found --wait=false >/dev/null
 # The controller creates each gateway's Deployment a moment after its Gateway.
 for i in $(seq 1 30); do
   k -n "$NS" get deploy agentgateway >/dev/null 2>&1 && k -n "$MCP_NS" get deploy mcp-gateway >/dev/null 2>&1 && break

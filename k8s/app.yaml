@@ -6,15 +6,8 @@
 ---
 # ---------------------------------------------------------------- viewfinder
 # The photo inbox (phone uploads land here), the live-camera page, and the
-# /stage page you put on the projector. A PVC, so the latest photo survives a
-# pod restart mid-show.
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata: {name: inbox, namespace: default}
-spec:
-  accessModes: [ReadWriteOnce]
-  resources: {requests: {storage: 1Gi}}
----
+# /stage page you put on the projector. No volume: the photos live in the pod,
+# so a restart (`kubectl rollout restart deploy/viewfinder`) clears them.
 apiVersion: v1
 kind: Service
 metadata: {name: viewfinder, namespace: default}
@@ -40,10 +33,6 @@ spec:
         - {name: VIEWFINDER_HOST, value: "0.0.0.0"}
         - {name: PREVIEW_PORT, value: "8888"}
         ports: [{containerPort: 8888}]
-        volumeMounts: [{name: inbox, mountPath: /data/inbox}]
         readinessProbe:
           httpGet: {path: /healthz, port: 8888}
           periodSeconds: 3
-      volumes:
-      - name: inbox
-        persistentVolumeClaim: {claimName: inbox}

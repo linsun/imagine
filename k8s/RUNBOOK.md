@@ -260,6 +260,16 @@ kubectl --context $CTX apply -f k8s/mcp/gateway.yaml         # mcp-gateway (mcp)
 kubectl --context $CTX -n $NS delete httproute photo-upload photo-inbox-page --ignore-not-found
 kubectl --context $CTX -n $NS delete agentgatewaypolicy photo-upload-access --ignore-not-found
 kubectl --context $CTX -n $NS delete secret photo-inbox-key --ignore-not-found
+# Once only: the viewfinder's old photo volume (photos now live in the pod)
+kubectl --context $CTX -n $NS delete pvc inbox --ignore-not-found --wait=false
+```
+
+**Start the show with no photo.** The viewfinder keeps its photos and the last
+film in the pod, so restarting it clears them; then reload the studio page and
+click **new session**:
+
+```bash
+kubectl --context $CTX -n $NS rollout restart deploy/viewfinder
 ```
 
 `kubectl apply` alone does **not** pick up a new `:dev` image or a changed
