@@ -255,7 +255,7 @@ $("pick").onclick = () => $("file").click();
 $("file").onchange = (e) => { upload([...e.target.files].find(isPhoto)); e.target.value = ""; };
 
 // What the screen says before there is a photo.
-const EMPTY = '<div class="empty"><b>🎬 Lights. Camera. You.</b></div>';
+const EMPTY = '<div class="empty"><b>🎬 Lights · Camera · You</b></div>';
 $("screen").innerHTML = EMPTY;
 
 let stream = null;
