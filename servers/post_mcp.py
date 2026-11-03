@@ -35,6 +35,10 @@ CREDITS_STYLE = os.environ.get("CREDITS_STYLE", "crawl").lower()
 # The one heading above the cast. Not a film title -- the Director used to
 # invent one ("The Audience") and it read as filler.
 CREDITS_TITLE = os.environ.get("CREDITS_TITLE", "AGNTCon + MCPCon Japan")
+# The small line between that heading and the names: what the list IS. "The
+# cast" when it is the audience; for a sponsor list, e.g. "Thank you to our
+# sponsors".
+CREDITS_HEADING = os.environ.get("CREDITS_HEADING", "The cast")
 # The closing card: the cast rolls first, then this line holds on screen at the
 # very end (the film's last frame, which ffplay parks on). ENDCARD_SECONDS=0
 # skips it.
@@ -388,7 +392,7 @@ def _card(width: int, height: int, title: str, subtitle: str,
     # are moving from the first frame. Any gap here is dead starfield while the
     # thank-you plays -- 0.18 of a frame height cost 1.5 seconds of nothing.
     top_gap = int(height * 0.02)
-    head = (int(title_size * 1.7) if title else 0) + (int(small * 2.6) if subtitle else 0) + int(small * 2.8)
+    head = (int(title_size * 1.7) if title else 0) + (int(small * 2.6) if subtitle else 0) + (int(small * 2.8) if CREDITS_HEADING else 0)
     # Barely any tail: the last name should clear the frame as the segment
     # ends, so the QR follows immediately instead of after seconds of stars.
     total = top_gap + head + rows * line_h + int(height * 0.06)
@@ -446,7 +450,8 @@ def _card(width: int, height: int, title: str, subtitle: str,
         centre(title.upper(), f_t, y); y += int(title_size * 1.7)
     if subtitle:
         centre(subtitle, f_s, y); y += int(small * 2.6)
-    centre("THE CAST", f_s, y); y += int(small * 2.8)
+    if CREDITS_HEADING:
+        centre(CREDITS_HEADING.upper(), f_s, y); y += int(small * 2.8)
 
     for i, (lines, font) in enumerate(wrapped):
         r, c = divmod(i, cols)
