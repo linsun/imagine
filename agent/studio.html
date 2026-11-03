@@ -13,7 +13,8 @@
   html, body { margin: 0; background: var(--bg); color: var(--text);
     font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
   main { max-width: 1280px; margin: 0 auto; padding: 20px 16px 140px; }
-  header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 18px; }
+  header { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
+  header .logo { height: 72px; width: auto; }
   header h1 { font-size: 18px; margin: 0; letter-spacing: .04em; }
   header h1 b { color: var(--accent); }
   header .host { color: var(--dim); font-size: 12px; margin-left: auto; font-family: ui-monospace, monospace; }
@@ -82,6 +83,7 @@
 <body>
 <main>
   <header>
+    <img class="logo" src="kubecon.svg" alt="KubeCon + CloudNativeCon North America 2026">
     <h1><b>imagine</b> · studio</h1>
     <span class="host" id="host"></span>
     <button class="who" id="who" title="Publishing needs a signed-in person">🔑 sign in</button>
@@ -147,7 +149,7 @@ async function showWake() {
   const arrived = nav ? (nav.responseStart - nav.requestStart) / 1000 : null;
   let me;
   try { me = await (await fetch("api/self", {cache: "no-store"})).json(); } catch { return; }
-  $("host").textContent = "actor " + me.host;
+  $("host").textContent = "actor " + me.actor;
   const w = me.last_wake, sinceWake = w ? me.now - w.at : null;
   const wake = $("wake");
   wake.classList.add("awake");

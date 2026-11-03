@@ -13,6 +13,7 @@ agentgateway's :3006 (with CORS), so the actor needs no egress at all:
 
   :3007 /            this page            (the actor)
   :3007 /api/self    when it woke, how long it slept
+  :3007 /kubecon.svg the KubeCon logo in the header
   :3006 /director/   the Director, A2A v1 (kagent)
   :3006 /photo/...   the photo inbox      (viewfinder)
   :3006 /stage/...   what is on the projector
@@ -22,7 +23,6 @@ agentgateway's :3006 (with CORS), so the actor needs no egress at all:
 
 import json
 import os
-import socket
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -30,6 +30,11 @@ from pathlib import Path
 
 PORT = int(os.environ.get("PORT", "8090"))
 PAGE = (Path(__file__).parent / "studio.html").read_bytes()
+# The KubeCon + CloudNativeCon NA 2026 logo, in the image so the stage needs
+# no internet for it.
+LOGO = (Path(__file__).parent / "kubecon.svg").read_bytes()
+# Who this is, for the header. Every actor's hostname is just "actor".
+ACTOR = os.environ.get("STUDIO_ACTOR", "default/studio")
 # A gap this long in a 1-second tick means the process was not running:
 # suspended (or, the first time, restored from the golden snapshot).
 GAP_S = float(os.environ.get("STUDIO_GAP_S", "5"))
@@ -56,7 +61,7 @@ def _self() -> dict:
     now = time.time()
     with _lock:
         wakes = list(_wakes)
-    return {"now": now, "started_at": _started, "host": socket.gethostname(),
+    return {"now": now, "started_at": _started, "actor": ACTOR,
             "wakes": len(wakes), "last_wake": wakes[-1] if wakes else None}
 
 
@@ -76,6 +81,8 @@ class _Handler(BaseHTTPRequestHandler):
         path = self.path.split("?", 1)[0]
         if path in ("/", "/index.html"):
             return self._send(200, PAGE, "text/html; charset=utf-8")
+        if path == "/kubecon.svg":
+            return self._send(200, LOGO, "image/svg+xml")
         if path == "/api/self":
             return self._send(200, json.dumps(_self()).encode(), "application/json")
         if path == "/healthz":
