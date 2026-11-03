@@ -53,6 +53,31 @@ kagent-dev/substrate v1.0.0-rc1, so take `kubectl-ate-darwin-arm64` from that
 release (not agent-substrate/substrate). The scripts use the `kubectl-ate` on
 PATH (override with `ATE_BIN`). A mismatched plugin gets "Unimplemented".
 
+**"Warning: no --token-file given; acting as the shared identity
+system:serviceaccount:ate-system:ate-client"** is only a warning: the
+command still runs. Without a token, the plugin mints one for Substrate's
+shared `ate-client` ServiceAccount, which this install makes a global owner.
+To act as yourself instead, once per cluster:
+
+```bash
+# Your own ServiceAccount, made a global owner of Substrate
+kubectl --context $CTX -n ate-system create serviceaccount $USER
+printf 'bindings:\n- role: owner\n  members:\n  - user:system:serviceaccount:ate-system:%s\n' "$USER" \
+  | kubectl ate --context $CTX create access-policy --global -f -
+```
+
+Then in each new terminal, mint a token (ate-api accepts the audience
+`api.ate-system.svc`) and use it through an alias:
+
+```bash
+kubectl --context $CTX -n ate-system create token $USER --audience api.ate-system.svc --duration 12h > ~/.ate-token
+alias kate="kubectl ate --context $CTX --token-file $HOME/.ate-token"
+kate get actors -A          # no warning
+```
+
+The token expires after 12 hours; mint another. The scripts still run as
+`ate-client` and print the warning, which is fine.
+
 ## 1. Preflight: are the platforms there?
 
 ```bash
