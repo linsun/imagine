@@ -179,7 +179,7 @@ done
 
 echo "== substrate workers"
 # The worker image matches the installed Substrate: same release as the
-# ate-controller (e.g. v0.6.0-alpha3).
+# ate-controller (e.g. v1.0.0-rc1).
 version=$(k -n ate-system get deploy ate-controller -o jsonpath='{.spec.template.spec.containers[0].image}' | sed 's/.*://')
 export WORKER_IMAGE=${WORKER_IMAGE:-ghcr.io/kagent-dev/substrate/ateworker-gvisor:$version}
 envsubst '${WORKER_IMAGE}' < k8s/workerpool.yaml | k apply -f - >/dev/null

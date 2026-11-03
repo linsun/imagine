@@ -17,7 +17,7 @@
 #
 # ${WORKER_IMAGE} is filled in by scripts/k8s-up.sh (ateworker-gvisor, at the
 # cluster's Substrate version).
-apiVersion: ate.dev/v1alpha1
+apiVersion: ate.dev/v1
 kind: WorkerPool
 metadata:
   name: imagine

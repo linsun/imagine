@@ -18,7 +18,8 @@ Where things live:
 ## 0. Shell setup (every new terminal)
 
 ```bash
-kind create cluster --name kagent --image kindest/node:v1.37.0
+# kind create cluster --name kagent --image kindest/node:v1.37.0
+kind create cluster --name kagent --config k8s/kind/kind-config.yaml
 ```
 
 ```bash
@@ -30,9 +31,19 @@ kubectl rollout status deployment/kagent-controller -n kagent --timeout=300s
 ```
 
 ```bash
+export GWAPI_VERSION=1.6.3
+kubectl apply --server-side -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v$GWAPI_VERSION/standard-install.yaml
+helm upgrade -i --create-namespace \
+  --namespace agentgateway-system \
+  --version v1.7.0 agentgateway-crds oci://cr.agentgateway.dev/charts/agentgateway-crds
+  helm upgrade -i -n agentgateway-system agentgateway oci://cr.agentgateway.dev/charts/agentgateway \
+--version v1.7.0
+```
+
+```bash
 cd ~/imagine
 set -a; . ./.env; set +a          # GEMINI_API_KEY, AGW_VIRTUAL_KEY, PHOTO_INBOX_KEY, ...
-export CTX=kind-kind NS=default MCP_NS=mcp REG=localhost:5001
+export CTX=kind-kagent NS=default MCP_NS=mcp REG=localhost:5001
 ```
 
 `kubectl ate` is the plugin at `/usr/local/bin/kubectl-ate`. It must be
@@ -126,6 +137,7 @@ PREVIEW_BROWSER and PHOTO_INBOX_KEY are dropped. Build it with the script,
 which reads `.env` the way bash does:
 
 ```bash
+export KIND_CLUSTER=kagent
 scripts/k8s-env.sh --diff       # what would change
 scripts/k8s-env.sh --restart    # apply, then restart every Deployment that reads it
 kubectl --context $CTX -n $MCP_NS get configmap imagine-env -o yaml   # what the pods actually got

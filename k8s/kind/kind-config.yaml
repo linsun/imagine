@@ -17,12 +17,20 @@ nodes:
 - role: control-plane
   extraMounts:
   # Registry routing for containerd: localhost:5001/* -> kind-registry:5000.
-  # kind node images read /etc/containerd/certs.d (config_path), so mounting
-  # the directory does what the script's `docker exec ... cp hosts.toml` did.
+  # containerd reads this directory through config_path (containerdConfigPatches
+  # below), so mounting it does what the script's `docker exec ... cp hosts.toml` did.
   # kind needs an absolute hostPath; /Users is shared with Docker Desktop by default.
   - hostPath: /Users/linsun/src/github.com/linsun/imagine/k8s/kind/certs.d
     containerPath: /etc/containerd/certs.d
     readOnly: true
+
+# Newer kind node images (containerd 2, e.g. v1.37.0) leave config_path empty,
+# so without this the mount above is ignored and pulls of localhost:5001/* go
+# to the node itself: "dial tcp [::1]:5001: connect: connection refused".
+containerdConfigPatches:
+- |-
+  [plugins."io.containerd.grpc.v1.cri".registry]
+    config_path = "/etc/containerd/certs.d"
 
 # Substrate's podcertificate controller issues workload certificates through
 # ClusterTrustBundle and PodCertificateRequest. They are not all on by default.
