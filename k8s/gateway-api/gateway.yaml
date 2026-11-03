@@ -17,7 +17,6 @@
 #   token-limit.yaml   :3000 how many tokens they get -- the demo knob
 #   agents.yaml        :3002 Scout, :3003 DP, :3006/director/ (kagent Agents)
 #   github.yaml        :3004 GitHub, with the real token swapped in
-#   photos.yaml        :3005 the photo inbox for the phone
 #   ../studio/routes.yaml  :3006 what the studio page calls, with CORS
 ---
 # How the controller should run this Gateway's proxy.
@@ -80,7 +79,6 @@ spec:
   - {name: scout, port: 3002, protocol: HTTP, allowedRoutes: {namespaces: {from: Same}}}
   - {name: dp, port: 3003, protocol: HTTP, allowedRoutes: {namespaces: {from: Same}}}
   - {name: github, port: 3004, protocol: HTTP, allowedRoutes: {namespaces: {from: Same}}}
-  - {name: photos, port: 3005, protocol: HTTP, allowedRoutes: {namespaces: {from: Same}}}
   # What the studio page calls (it is served on :3007 by `kubectl ate proxy`,
   # not by this gateway): the Director at /director/ (agents.yaml), /photo/
   # and /stage/ (../studio/routes.yaml).

@@ -24,7 +24,7 @@ if [ "${1:-}" = "--purge" ]; then
   ate delete actor studio -a default 2>/dev/null
   ate delete actor-template studio -a default 2>/dev/null
   k delete -f k8s/studio/routes.yaml -f k8s/gateway-api/ -f k8s/app.yaml -f k8s/workerpool.yaml --ignore-not-found
-  k -n default delete secret provider-keys agw-virtual-key agw-publish-key photo-inbox-key --ignore-not-found
+  k -n default delete secret provider-keys agw-virtual-key agw-publish-key --ignore-not-found
   k -n default delete configmap gateway-costs --ignore-not-found
   k delete namespace mcp --wait=false
   echo "demo deleted from default; namespace mcp deleting (kagent and the cluster are left alone)"

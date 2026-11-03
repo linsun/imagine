@@ -1,13 +1,13 @@
 # The keynote demo on Agent Substrate (kind)
 
 The same show as the laptop version (`../README.md`). The agents only run
-while they're being asked something, and the photo comes from your phone
-(or a drone, via the phone).
+while they're being asked something, and the photo comes from your phone by
+AirDrop.
 
 ```
- phone ──(wifi)──▶ agentgateway :3005 ─▶ viewfinder (photo inbox + /stage page)
  browser :3007 ──▶ kubectl ate proxy ─▶ atenet-router ── wakes ──▶ studio actor
  studio page, ./imagine k8s demo ▶ agentgateway :3006/director/ ─▶ kagent ─▶ Director actor
+ studio page (photo drop) ─▶ agentgateway :3006/photo/ ─▶ viewfinder (photo inbox + /stage page)
                                                          │
      Director ─▶ agentgateway :3000 LLM ─▶ Gemini        │  namespace default
      Director ─▶ agentgateway :3002/:3003 ─▶ kagent ─▶ Scout, DP actors
@@ -101,19 +101,9 @@ actor gets "no worker room".
 Say **"use my latest photo"** (tool `camera_latest_photo`); the newest upload
 wins. The Director needn't be running when the photo arrives.
 
-- **iOS Shortcut:** Get Latest Photos (1) → Convert Image to JPEG → Get
-  Contents of URL, set up as follows:
-  - URL: `http://<laptop-ip>:3005/upload`
-  - Method: POST
-  - Header: `Authorization: Bearer <PHOTO_INBOX_KEY>` (default `sk-imagine-photos`)
-  - Request Body: File
-
-  For a drone, use Find Photos sorted by date, limit 1. It works once the
-  drone app has saved the shot to Photos.
-- **No setup:** open `http://<laptop-ip>:3005/inbox#key=<PHOTO_INBOX_KEY>`
-  on the phone.
-- **Venue wifi that blocks device-to-device traffic:** put the laptop on the
-  phone's hotspot, then run `./imagine k8s forward` again for the new IP.
+- **AirDrop:** send the photo from the iPhone to the laptop, then drag it
+  from ~/Downloads onto the studio page (`http://localhost:3007/`). The page
+  uploads it through `:3006/photo/upload`. AirDrop doesn't need the venue wifi.
 - **Live instead:** open `http://localhost:8888/` in Safari (Continuity
   Camera) and say "take the photo, count down from 3".
 

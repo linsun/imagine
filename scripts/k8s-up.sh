@@ -4,7 +4,7 @@
 #   ./imagine k8s up        (or: scripts/k8s-up.sh)
 #
 # Two namespaces:
-#   default   agentgateway (k8s/gateway-api/: LLMs, agents, GitHub, photos,
+#   default   agentgateway (k8s/gateway-api/: LLMs, agents, GitHub,
 #             studio), the viewfinder (k8s/app.yaml), the worker pool
 #             (k8s/workerpool.yaml), and the agents: Director, Scout, DP as
 #             kagent Agents (k8s/kagent/) and the studio page as a raw
@@ -33,7 +33,6 @@ MCP_NS=mcp
 REG=localhost:5001
 SUBSTRATE_DIR=${SUBSTRATE_DIR:-$HOME/src/github.com/linsun/substrate}
 AGENTS=${AGENTS:-scout dp director}
-PHOTO_INBOX_KEY=${PHOTO_INBOX_KEY:-sk-imagine-photos}
 k() { kubectl --context "$CTX" "$@"; }
 # The kubectl-ate on PATH, unless ATE_BIN says otherwise. It must match the
 # cluster's Substrate version: the API moves quickly, and a mismatched plugin
@@ -103,7 +102,6 @@ k -n "$MCP_NS" create secret generic provider-keys \
   --dry-run=client -o yaml | k apply -f - >/dev/null
 # The settings for the MCP servers: .env, read the way bash reads it.
 KIND_CLUSTER=${CTX#kind-} scripts/k8s-env.sh
-hash=$(printf '%s' "$PHOTO_INBOX_KEY" | shasum -a 256 | cut -d' ' -f1)
 # The agents' virtual key: only its hash goes into the gateway's Secrets, so
 # the gateway always accepts exactly the key in .env.
 agw_hash=$(printf '%s' "$AGW_VIRTUAL_KEY" | shasum -a 256 | cut -d' ' -f1)
@@ -116,7 +114,6 @@ apikey() {  # secret entry hash name
 }
 apikey agw-virtual-key director "$agw_hash" director
 apikey agw-publish-key publish "$agw_hash" publish
-apikey photo-inbox-key phone "$hash" phone
 k -n "$NS" create configmap gateway-costs \
   --from-file=base-costs.json=gateway/base-costs.json \
   --dry-run=client -o yaml | k apply -f - >/dev/null
@@ -163,6 +160,11 @@ echo "== always-on services"
 k apply -f k8s/app.yaml -f k8s/mcp/servers.yaml >/dev/null
 # The controller pushes route and policy changes live: no restart needed.
 k apply -f k8s/gateway-api/ -f k8s/mcp/gateway.yaml >/dev/null
+# Once only: the phone's photo inbox on :3005, gone now that the photo comes
+# by AirDrop and a drop on the studio page (:3006/photo/upload).
+k -n "$NS" delete httproute photo-upload photo-inbox-page --ignore-not-found >/dev/null
+k -n "$NS" delete agentgatewaypolicy photo-upload-access --ignore-not-found >/dev/null
+k -n "$NS" delete secret photo-inbox-key --ignore-not-found >/dev/null
 # The controller creates each gateway's Deployment a moment after its Gateway.
 for i in $(seq 1 30); do
   k -n "$NS" get deploy agentgateway >/dev/null 2>&1 && k -n "$MCP_NS" get deploy mcp-gateway >/dev/null 2>&1 && break

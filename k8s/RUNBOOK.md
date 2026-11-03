@@ -11,7 +11,7 @@ Where things live:
 
 | Namespace | What |
 | --- | --- |
-| `default` | agentgateway (LLMs :3000, Scout :3002, DP :3003, GitHub :3004, photos :3005, studio's API and Director :3006), the viewfinder, the worker pool, the kagent Agents, and atespace `default` with every actor |
+| `default` | agentgateway (LLMs :3000, Scout :3002, DP :3003, GitHub :3004, studio's API and Director :3006), the viewfinder, the worker pool, the kagent Agents, and atespace `default` with every actor |
 | `mcp` | the MCP gateway (:3001), the five MCP servers, Keycloak |
 | `otel-system` | the OTel collector and Jaeger |
 
@@ -43,7 +43,7 @@ helm upgrade -i --create-namespace \
 
 ```bash
 cd ~/imagine
-set -a; . ./.env; set +a          # GEMINI_API_KEY, AGW_VIRTUAL_KEY, PHOTO_INBOX_KEY, ...
+set -a; . ./.env; set +a          # GEMINI_API_KEY, AGW_VIRTUAL_KEY, ...
 export CTX=kind-kagent NS=default MCP_NS=mcp REG=localhost:5001
 ```
 
@@ -150,16 +150,14 @@ on screen in the credits), and `KEY=a  # note` arrives with its comment (a
 GitHub repo name that doesn't exist).
 
 **Gateway API keys.** The cluster stores only **hashes** of the keys.
-`apiKey.name` (`director`, `publish`, `phone`) is the bucket the token limit
+`apiKey.name` (`director`, `publish`) is the bucket the token limit
 counts against:
 
 ```bash
 apikey() { kubectl --context $CTX -n $NS create secret generic "$1" --from-literal="$2"="{\"keyHash\":\"sha256:$3\",\"metadata\":{\"name\":\"$4\"}}" --dry-run=client -o yaml | kubectl --context $CTX apply -f -; }
 agw_hash=$(printf '%s' "$AGW_VIRTUAL_KEY" | shasum -a 256 | cut -d' ' -f1)
-photo_hash=$(printf '%s' "${PHOTO_INBOX_KEY:-sk-imagine-photos}" | shasum -a 256 | cut -d' ' -f1)
 apikey agw-virtual-key director "$agw_hash" director
 apikey agw-publish-key publish  "$agw_hash" publish
-apikey photo-inbox-key phone    "$photo_hash" phone
 kubectl --context $CTX -n $NS create configmap gateway-costs --from-file=base-costs.json=gateway/base-costs.json --dry-run=client -o yaml | kubectl --context $CTX apply -f -
 ```
 
@@ -232,6 +230,11 @@ kubectl --context $CTX apply -f k8s/app.yaml                 # viewfinder (defau
 kubectl --context $CTX apply -f k8s/mcp/servers.yaml         # the 5 MCP servers (mcp)
 kubectl --context $CTX apply -f k8s/gateway-api/             # agentgateway (default): listeners, routes, policies
 kubectl --context $CTX apply -f k8s/mcp/gateway.yaml         # mcp-gateway (mcp): :3001, publish sign-in
+
+# Once only: the phone's old photo inbox on :3005 (the photo now comes by AirDrop)
+kubectl --context $CTX -n $NS delete httproute photo-upload photo-inbox-page --ignore-not-found
+kubectl --context $CTX -n $NS delete agentgatewaypolicy photo-upload-access --ignore-not-found
+kubectl --context $CTX -n $NS delete secret photo-inbox-key --ignore-not-found
 ```
 
 `kubectl apply` alone does **not** pick up a new `:dev` image or a changed
@@ -330,18 +333,24 @@ first request to :3007 (the proxy, phase 9) wakes it.
 
 `scripts/k8s-pf.sh` (also `./imagine k8s forward`) runs each forward below
 in a restart loop, in the background. Logs go to `logs/pf-<name>.log`.
+They are only for the laptop and the phone: inside the cluster, the agents,
+gateways and MCP servers reach each other by their Service names.
 
 | Laptop | Target | What |
 | --- | --- | --- |
-| 0.0.0.0:3005 | svc/agentgateway | photo inbox (the phone uses this over wifi) |
 | :3007 | actor default/studio | the studio page, via `kubectl ate proxy` through atenet-router |
 | :3006 | svc/agentgateway | what the page calls: the Director at `/director/` (also `./imagine k8s demo`), `/photo/`, `/stage/` |
-| :3001 | mcp svc/mcp-gateway | the MCP endpoint (the gateway UI's playground) |
 | :8888 | svc/viewfinder | `/stage` on the projector |
 | :16686 | otel-system svc/jaeger | traces |
+| :8080 | mcp svc/keycloak | sign-in (the token's issuer is this address) |
+
+The debug UIs only with `DEBUG_FORWARDS=1 ./imagine k8s forward`:
+
+| Laptop | Target | What |
+| --- | --- | --- |
+| :3001 | mcp svc/mcp-gateway | the MCP endpoint (the gateway UI's playground) |
 | :15000 | deploy/agentgateway | gateway admin UI |
 | :15001 | mcp deploy/mcp-gateway | MCP gateway admin UI |
-| :8080 | mcp svc/keycloak | sign-in |
 
 A single forward, by hand:
 
@@ -449,10 +458,10 @@ kubectl --context $CTX -n $MCP_NS rollout restart deploy/vision-mcp          # r
 
 ```bash
 curl -s localhost:3006/photo/latest                                          # has_photo, age_s
-PHOTO_MATCH='.*' scripts/send-photo.sh                                       # newest file in ~/Downloads
 ```
 
-Or drag the photo onto the studio page.
+AirDrop it from the iPhone, then drag it from ~/Downloads onto the studio page.
+The page uploads it through :3006/photo/upload.
 
 **Scout or DP fail**: the Director calls them through :3002/:3003, so check
 their session actors the same way as the Director's (TEMPLATE `default/scout-…`
