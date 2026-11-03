@@ -41,6 +41,11 @@
   .screen .tag { position: absolute; left: 12px; top: 12px; background: #000a; padding: 3px 10px;
     border-radius: 99px; font-size: 12px; color: var(--dim); }
   .screen .unmute { position: absolute; right: 12px; bottom: 12px; display: none; }
+  .screen .count { position: absolute; inset: 0; display: grid; place-items: center;
+    font-size: 120px; font-weight: 800; color: #fff; text-shadow: 0 4px 24px #000; pointer-events: none; }
+  .shoot { display: flex; gap: 10px; flex-wrap: wrap; padding: 12px 14px; border-top: 1px solid var(--line); }
+  .shoot button { font-size: 14px; padding: 9px 14px; }
+  .shoot .hint { color: var(--dim); font-size: 12px; align-self: center; margin-left: auto; }
 
   .crew { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding: 14px; }
   .agent { border: 1px solid var(--line); border-radius: 12px; padding: 12px; text-align: center;
@@ -100,7 +105,15 @@
   <div class="grid">
     <section class="panel">
       <div class="screen" id="screen">
-        <div class="empty">No photo yet.<br>Drop one on this page, or send it from the phone or laptop.</div>
+        <div class="empty">No photo yet.<br>Drop one on this page, take one with the webcam, or choose a file.</div>
+      </div>
+      <div class="shoot">
+        <button type="button" id="cam">📷 Webcam</button>
+        <button type="button" id="snap" class="primary" hidden>Take it (3, 2, 1)</button>
+        <button type="button" id="cam-off" hidden>Cancel</button>
+        <button type="button" id="pick">🖼️ Choose photo</button>
+        <input type="file" id="file" accept="image/jpeg,image/png,image/heic,image/heif,.heic,.heif" hidden>
+        <span class="hint">or drop one anywhere</span>
       </div>
     </section>
 
@@ -188,6 +201,7 @@ function show(kind, src, tag) {
 }
 
 async function pollScreen() {
+  if (showing === "camera") return;      // the webcam preview is up: leave it
   try {
     const st = await (await fetch(API + "stage/state", {cache: "no-store"})).json();
     if (stageSeq !== null && st.seq !== stageSeq && st.kind) {
@@ -214,14 +228,67 @@ addEventListener("dragleave", () => { if (--depth <= 0) { depth = 0; document.bo
 addEventListener("dragover", (e) => e.preventDefault());
 addEventListener("drop", async (e) => {
   e.preventDefault(); depth = 0; document.body.classList.remove("dragging");
-  const f = [...e.dataTransfer.files].find((f) => f.type.startsWith("image/") || /\.hei[cf]$/i.test(f.name));
-  if (!f) return;
-  step("📤 sending " + f.name + " to the inbox");
+  upload([...e.dataTransfer.files].find(isPhoto));
+});
+
+// A photo the inbox can read: JPEG, PNG or HEIC. Not SVG -- that is a
+// drawing, not a photo, and the inbox turns it away with a 415.
+function isPhoto(f) {
+  return f && f.type !== "image/svg+xml" &&
+         (f.type.startsWith("image/") || /\.hei[cf]$/i.test(f.name));
+}
+
+async function upload(f, name) {
+  if (!f) { step("! not a photo: use a JPEG, PNG or HEIC", true); return; }
+  step("📤 sending " + (name || f.name) + " to the inbox");
   const r = await fetch(API + "photo/upload", {method: "POST", body: f,
                                          headers: {"Content-Type": f.type || "image/heic"}});
   step(r.ok ? "📥 in the inbox: ask for your latest photo" : "! upload failed (" + r.status + ")", !r.ok);
   showing = ""; pollScreen();
-});
+}
+
+// The backup when the drone or the phone lets you down: a file from this
+// laptop, or a shot from its webcam. Both land in the same inbox.
+$("pick").onclick = () => $("file").click();
+$("file").onchange = (e) => { upload([...e.target.files].find(isPhoto)); e.target.value = ""; };
+
+let stream = null;
+function camUI(on) {
+  $("cam").hidden = on; $("pick").hidden = on;
+  $("snap").hidden = !on; $("cam-off").hidden = !on;
+}
+function camStop() {
+  if (stream) stream.getTracks().forEach((t) => t.stop());
+  stream = null; camUI(false);
+  if (showing === "camera") { showing = ""; photoAt = null; $("screen").innerHTML =
+    '<div class="empty">No photo yet.</div>'; pollScreen(); }
+}
+$("cam").onclick = async () => {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia(
+      {video: {width: {ideal: 1920}, height: {ideal: 1080}}, audio: false});
+  } catch (err) { step("! no webcam: " + err.message, true); return; }
+  const s = $("screen");
+  s.innerHTML = '<video autoplay playsinline muted></video><span class="tag">webcam</span>';
+  s.querySelector("video").srcObject = stream;
+  showing = "camera"; camUI(true);
+};
+$("cam-off").onclick = camStop;
+$("snap").onclick = async () => {
+  const s = $("screen"), v = s.querySelector("video");
+  if (!v) return;
+  $("snap").disabled = $("cam-off").disabled = true;
+  const c = document.createElement("div"); c.className = "count"; s.appendChild(c);
+  for (const n of [3, 2, 1]) { c.textContent = n; await new Promise((r) => setTimeout(r, 1000)); }
+  c.remove();
+  const canvas = document.createElement("canvas");
+  canvas.width = v.videoWidth; canvas.height = v.videoHeight;
+  canvas.getContext("2d").drawImage(v, 0, 0);
+  const blob = await new Promise((r) => canvas.toBlob(r, "image/jpeg", 0.92));
+  $("snap").disabled = $("cam-off").disabled = false;
+  camStop();
+  upload(blob, "the webcam photo");
+};
 
 // ------------------------------------------------------------ the crew
 const CREW = {scout: /imagining the scene/i, dp: /camera move|music/i};
