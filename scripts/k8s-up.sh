@@ -205,13 +205,16 @@ done
 echo "   workers ready: ${ready:-0}/2 (substrate $version)"
 
 echo "== agents on kagent (namespace $NS)"
-# kagent owns the agents' ActorTemplates and actors: we apply Agents and
-# Harnesses, and kagent starts one actor per session when a request comes in.
+# kagent owns the agents' ActorTemplates and actors: we apply the Agents and
+# their one Harness, and kagent starts one actor per session when a request
+# comes in.
 IMAGE="$IMAGE" AGW_VIRTUAL_KEY="$AGW_VIRTUAL_KEY" \
   GITHUB_REPO="${GITHUB_REPO:-}" GITHUB_RELEASE_TAG="${GITHUB_RELEASE_TAG:-}" \
   envsubst '${IMAGE} ${AGW_VIRTUAL_KEY} ${GITHUB_REPO} ${GITHUB_RELEASE_TAG}' \
-  < k8s/kagent/harnesses.yaml | k apply -f - >/dev/null
+  < k8s/kagent/harness.yaml | k apply -f - >/dev/null
 k apply -f k8s/kagent/egress-policy.yaml -f k8s/kagent/agents.yaml >/dev/null
+# The per-agent Harnesses from before, once no Agent points at them.
+k -n "$NS" delete harness imagine-director imagine-scout imagine-dp --ignore-not-found >/dev/null
 for agent in $AGENTS; do
   k -n "$NS" wait agent/"$agent" --for=condition=Ready --timeout=300s >/dev/null \
     && echo "   $agent ready" \

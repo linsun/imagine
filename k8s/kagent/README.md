@@ -6,9 +6,9 @@ into an ActorTemplate, starts one actor per session, and owns its lifecycle.
 
 | File | What |
 | --- | --- |
-| `harnesses.yaml` | One BYO `Harness` per agent: image (by digest), command, env, pool, snapshots |
+| `harness.yaml` | The one BYO `Harness` all three share: image (by digest), command, env, pool, snapshots |
 | `egress-policy.yaml` | kagent `EgressPolicy`: the two gateways' ports + the OTel collector, nothing else |
-| `agents.yaml` | The three `Agent`s: a Harness + an inline description |
+| `agents.yaml` | The three `Agent`s: the shared Harness + an inline description |
 
 The worker pool is `../workerpool.yaml` (2 workers, shared with the studio),
 and the routes to kagent's A2A endpoint (:3002, :3003, :3006/director/) are
@@ -22,8 +22,10 @@ kubectl get agents,harnesses
 
 ## How the agents meet kagent's BYO contract
 
-All three run `agent/kagent_runtime.py` (`python -m agent.kagent_runtime
-director|scout|dp`), from `Dockerfile.kagent`. It does what kagent expects of a
+All three run `agent/kagent_runtime.py` (`python -m agent.kagent_runtime`),
+from `Dockerfile.kagent`, through one Harness. The runtime takes which agent it
+is from kagent's config (`runtime.name`, the Agent's name), and the shared env
+is the Director's; Scout and DP ignore what they don't use. It does what kagent expects of a
 BYO image (`go/core/internal/substrate/actor_template.go` and
 `go/core/internal/a2agateway/` at `v1.0.0-rc1`):
 
@@ -70,7 +72,7 @@ The laptop still uses them. Scout and DP share their LLM call
   field; kagent books 1 CPU / 1Gi per actor, so a 2 CPU / 2Gi worker
   (`../workerpool.yaml`) holds two of them.
 - **32 env vars per actor, kagent's included.** kagent adds about a dozen of
-  its own (trust bundle, config, telemetry), so keep the Harness lists short.
+  its own (trust bundle, config, telemetry), so keep the Harness list short.
 
 ## Tested, and not yet
 

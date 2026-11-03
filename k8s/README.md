@@ -164,6 +164,6 @@ and refused without a signed-in user (`jwt.sub`).
 
 ## Tracing
 
-Both gateways (`imagine-gateway`, `mcp-gateway`) and the Director
-(`imagine-director`) send traces to the OTel collector in `otel-system`, which
+Both gateways (`imagine-gateway`, `mcp-gateway`) and the agents
+(`imagine-director`, `imagine-scout`, `imagine-dp`) send traces to the OTel collector in `otel-system`, which
 feeds Jaeger: `http://localhost:16686`.

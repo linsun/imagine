@@ -252,10 +252,10 @@ kagent owns the agents' ActorTemplates and actors. We only declare **what**
 to run:
 
 ```bash
-# One Harness per agent: image (by digest), command, env
+# One Harness for all three: image (by digest), command, env
 GITHUB_REPO="${GITHUB_REPO:-}" GITHUB_RELEASE_TAG="${GITHUB_RELEASE_TAG:-}" \
   envsubst '${IMAGE} ${AGW_VIRTUAL_KEY} ${GITHUB_REPO} ${GITHUB_RELEASE_TAG}' \
-  < k8s/kagent/harnesses.yaml | kubectl --context $CTX apply -f -
+  < k8s/kagent/harness.yaml | kubectl --context $CTX apply -f -
 
 # What the actors may reach (the two gateways + the OTel collector), and the Agents themselves
 kubectl --context $CTX apply -f k8s/kagent/egress-policy.yaml -f k8s/kagent/agents.yaml

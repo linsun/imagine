@@ -1,0 +1,26 @@
+# Extra Helm values for the Substrate release `kagent install` puts in
+# ate-system. scripts/k8s-up.sh applies them with
+#   helm upgrade substrate oci://ghcr.io/kagent-dev/substrate/helm/substrate \
+#     --version <installed> --reuse-values -f k8s/substrate-values.yaml
+# so kagent's own values (router URL, owners, SPIFFE allowlist) are kept.
+#
+# Telemetry. With no endpoint the chart turns OTLP export off on the workers
+# (OTEL_*_EXPORTER=none), so Jaeger never sees an actor wake. This sends the
+# controller, the API server, atelet, the router and every worker to the
+# collector in otel-system (installed by k8s-up.sh).
+otel:
+  endpoint: http://opentelemetry-collector.otel-system.svc:4317
+  traces:
+    # Every trace, not the chart's 1%: a demo has few requests, and each one
+    # should show up in Jaeger.
+    samplingRatio: 1.0
+
+# Who may reach actors through atenet-router (mTLS client certificates).
+# kagent install allows only kagent's controller. The studio page is served by
+# `kubectl ate proxy actor studio` (scripts/k8s-pf.sh), which mints a client
+# certificate for ate-system/atenet-client, so allow that too. A list replaces
+# the old one whole, so kagent's entry is repeated here.
+atenetRouter:
+  ingressAllowedSPIFFEIDs:
+  - spiffe://cluster.local/ns/kagent/sa/kagent-controller
+  - spiffe://cluster.local/ns/ate-system/sa/atenet-client

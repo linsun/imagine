@@ -1,0 +1,57 @@
+# One BYO Harness for all three agents. A Harness is kagent's runtime: the
+# image, the command, literal env and the Substrate placement. Director, Scout
+# and DP share it: the runtime reads which Agent it is from kagent's config
+# (runtime.name), and the env is the Director's, which Scout and DP ignore.
+#
+# agent/kagent_runtime.py from Dockerfile.kagent: A2A v1 over gRPC on :80 (the
+# port comes from kagent's config), /readyz on :8081, tasks saved to kagent's
+# controller.
+#
+# ${IMAGE} (the Dockerfile.kagent image, pinned by digest -- kagent rejects
+# tags for BYO), ${AGW_VIRTUAL_KEY}, ${GITHUB_REPO} and ${GITHUB_RELEASE_TAG}
+# are filled in by scripts/k8s-up.sh.
+#
+# What kagent adds on its own: KAGENT_CONFIG_JSON and KAGENT_AGENT_CARD_JSON,
+# the gateway trust bundle (SSL_CERT_FILE and friends), OTel resource
+# attributes, the /data durable dir, and the wakeup probe. Substrate allows 32
+# env vars per actor in total, so keep this list short.
+#
+# kagent makes a new immutable template revision on every change. Snapshots
+# are kagent's choice (VOLUMES fidelity: /data survives, the process does not).
+apiVersion: api.kagent.dev/v1alpha3
+kind: Harness
+metadata:
+  name: imagine
+  namespace: default
+spec:
+  byo: {}
+  workload:
+    image: ${IMAGE}
+    command: [python, -m, agent.kagent_runtime]
+  env:
+  # Substrate runs the command as given: the image's WORKDIR is not applied,
+  # so the package directory has to be on the path explicitly.
+  - {name: PYTHONPATH, value: /app}
+  - {name: PYTHONUNBUFFERED, value: "1"}
+  - {name: AGW_LLM, value: "http://agentgateway.default.svc.cluster.local:3000"}
+  - {name: AGW_VIRTUAL_KEY, value: "${AGW_VIRTUAL_KEY}"}
+  # The Director's alone from here on.
+  - {name: AGW_MCP, value: "http://mcp-gateway.mcp.svc.cluster.local:3001/mcp"}
+  # Scout and DP: A2A v1, via ../gateway-api/agents.yaml.
+  - {name: SCOUT_A2A, value: "http://agentgateway.default.svc.cluster.local:3002"}
+  - {name: DP_A2A, value: "http://agentgateway.default.svc.cluster.local:3003"}
+  - {name: CREW_A2A_PROTOCOL, value: v1}
+  - {name: GITHUB_REPO, value: "${GITHUB_REPO}"}
+  - {name: GITHUB_RELEASE_TAG, value: "${GITHUB_RELEASE_TAG}"}
+  # Film and photo handles, and the Director's saved conversation
+  # (/data/director.json): the durable dir is all a snapshot keeps.
+  - {name: OUTPUT_DIR, value: /data/outputs}
+  # Traces, as imagine-<agent> (the runtime sets the service name).
+  - {name: TRACING, value: "1"}
+  - {name: OTEL_EXPORTER_OTLP_PROTOCOL, value: http/protobuf}
+  - {name: OTEL_EXPORTER_OTLP_ENDPOINT, value: "http://opentelemetry-collector.otel-system.svc.cluster.local:4318"}
+  substrate:
+    workerPoolRef: {name: imagine}
+    # Required. gs:// is only the URL shape; on kind the bytes go to the
+    # in-cluster rustfs.
+    snapshotPolicy: {location: "gs://ate-snapshots/imagine/"}

@@ -18,7 +18,11 @@ and the request plumbing. This file is the executors and the two listeners.
 The A2A 0.3 servers (agent/a2a_server.py, agent/crew.py) stay as they are for
 the laptop.
 
-  python -m agent.kagent_runtime director|scout|dp
+One Harness runs all three (k8s/kagent/harness.yaml): which agent this is
+comes from kagent's config (runtime.name, the Agent's name), or from the
+command line outside kagent.
+
+  python -m agent.kagent_runtime                # in kagent: the Agent's name
   KAGENT_LOCAL=1 A2A_GRPC_PORT=50051 READYZ_PORT=8081 \\
       python -m agent.kagent_runtime scout      # no kagent: tasks in memory
 """
@@ -31,7 +35,23 @@ import re
 import sys
 from pathlib import Path
 
-import grpc
+
+def _role() -> str:
+    """director, scout or dp: the command-line argument, else the kagent
+    Agent's name from KAGENT_CONFIG_JSON (runtime.name)."""
+    if len(sys.argv) > 1:
+        return sys.argv[1]
+    try:
+        return json.loads(os.environ["KAGENT_CONFIG_JSON"])["runtime"]["name"]
+    except (KeyError, TypeError, ValueError):
+        return "director"
+
+
+ROLE = _role()
+# Before agent.tracing reads it at import: each agent is its own service in Jaeger.
+os.environ.setdefault("OTEL_SERVICE_NAME", f"imagine-{ROLE}")
+
+import grpc  # noqa: E402 -- after the service name is set
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.request_handlers.grpc_handler import GrpcHandler
 from a2a.server.tasks import InMemoryTaskStore, TaskUpdater
@@ -244,7 +264,7 @@ async def serve(role: str) -> None:
 if __name__ == "__main__":
     logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"),
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-    which = sys.argv[1] if len(sys.argv) > 1 else "director"
-    if which not in EXECUTORS:
-        sys.exit(f"usage: python -m agent.kagent_runtime {'|'.join(EXECUTORS)}")
-    asyncio.run(serve(which))
+    if ROLE not in EXECUTORS:
+        sys.exit(f"unknown agent {ROLE!r}: name the kagent Agent, or run "
+                 f"python -m agent.kagent_runtime {'|'.join(EXECUTORS)}")
+    asyncio.run(serve(ROLE))
