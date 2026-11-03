@@ -57,7 +57,9 @@ Write it in this order, because the video model obeys the start most:
 3. THE MUSIC. The video model makes its own audio, so ALWAYS name it.
 
 People may leave their seats or the ground if the action needs it; the room
-itself stays the same room.
+itself stays the same room. They are the real audience, so keep their faces
+toward the camera: the camera moves WITH them and stays close, never so far
+away that they become specks.
 
 In:  "dancing joyfully, paper lanterns, warm festival light"
 Out: "Everyone springs up and dances, arms raised, spinning in the aisles.
@@ -66,8 +68,9 @@ Out: "Everyone springs up and dances, arms raised, spinning in the aisles.
 
 In:  "flying on magic broomsticks, golden sparkles, wind-swept"
 Out: "Each person mounts a broomstick and shoots up out of their seat, soaring
-      high toward the ceiling, hair and clothes whipping in the wind. Camera
-      tilts up fast to follow them. Soaring orchestral fanfare, crowd cheering."
+      high toward the ceiling, hair and clothes whipping in the wind, grinning
+      at the camera. Camera rises with them, close on their faces. Soaring
+      orchestral fanfare, crowd cheering."
 """
 
 ROLES = {

@@ -192,18 +192,24 @@ READY_PHRASE = os.environ.get("READY_PHRASE", "")
 # NOTE: deliberately contains NO location, culture or theme. All of that comes
 # from what you type, so the same agent works at the next conference unchanged.
 # ---------------------------------------------------------------------------
+#
+# The people are NOT re-posed here. This used to ask for them "already
+# mid-action", and redrawing a crowd in new poses redraws every face: the film
+# then showed strangers flying. Only the video moves them, starting from the
+# real faces in this frame.
 PRESERVE_IMAGE = (
-    "Edit this photograph. It must remain recognisably the SAME photo of the "
-    "SAME room and the SAME people: same faces, same number of people, same "
-    "clothing, same room layout, same camera angle. Poses, props and how high "
-    "people are may change to show the action that was asked for -- this still "
-    "is the first frame of a film, so catch them already mid-action. "
-    "Do NOT relocate them, do NOT replace the background with a different "
-    "place, do NOT invent new people or remove anyone. Keep every face "
-    "recognisable and dignified.\n\n"
-    "Working within that, apply this: {idea}\n\n"
-    "The person directing asked for exactly this, and every part of it must be "
-    "honoured, including any greeting, gesture or action: \"{asked}\"\n\n"
+    "Edit this photograph lightly. It is the first frame of a film about these "
+    "exact people, so it must stay recognisably the SAME photo: the SAME people "
+    "in the SAME places and the SAME poses, with the SAME faces, expressions, "
+    "hair and clothing, the same number of people, the same room and the same "
+    "camera angle. Do NOT redraw, move, re-pose or restyle anyone, and do NOT "
+    "invent new people or remove anyone: every face stays exactly as "
+    "photographed. The action happens later, in the film, not in this frame.\n\n"
+    "Change only the light, the colour, the atmosphere, and what is around and "
+    "above the people (effects, decorations, props beside them), to set the "
+    "scene for this: {idea}\n\n"
+    "The person directing asked for exactly this; set the scene for every part "
+    "of it: \"{asked}\"\n\n"
     "No text, no captions, no watermarks."
 )
 
@@ -216,6 +222,13 @@ PRESERVE_VIDEO = (
     "whole clip. Keep the SAME people (same faces, same clothing) in the SAME "
     "room -- people may leave their seats or the ground if the action calls for "
     "it, but the room itself is not replaced with another place.\n\n"
+    # The first frame is the real audience; the likeness is lost when the
+    # model redraws them mid-motion or the camera leaves them as specks.
+    "The people are the real audience in the first frame. For the whole clip "
+    "each person keeps their own face, hair, skin tone, build and clothing from "
+    "that frame: nobody turns into someone else and nobody new appears. Keep "
+    "their faces turned toward the camera as they move, and keep the camera "
+    "close enough that the faces stay recognisable.\n\n"
     # The user's request is deliberately NOT quoted back here. Veo treats quoted
     # text as a line to be SPOKEN -- which is why the film came out with someone
     # saying "make them dance and add some japanese vibe" out loud.
