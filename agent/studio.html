@@ -38,6 +38,8 @@
   .screen { position: relative; aspect-ratio: 16 / 10; background: #000; display: grid; place-items: center; }
   .screen img, .screen video { width: 100%; height: 100%; object-fit: contain; display: block; }
   .screen .empty { color: var(--dim); text-align: center; padding: 24px; }
+  .screen .empty b { display: block; color: var(--text); font-size: clamp(24px, 3.4vw, 38px);
+    font-weight: 700; margin-bottom: 8px; }
   .screen .tag { position: absolute; left: 12px; top: 12px; background: #000a; padding: 3px 10px;
     border-radius: 99px; font-size: 12px; color: var(--dim); }
   .screen .unmute { position: absolute; right: 12px; bottom: 12px; display: none; }
@@ -105,7 +107,7 @@
   <div class="grid">
     <section class="panel">
       <div class="screen" id="screen">
-        <div class="empty">No photo yet.<br>Drop one on this page, take one with the webcam, or choose a file.</div>
+        <div class="empty"></div>
       </div>
       <div class="shoot">
         <button type="button" id="cam">📷 Webcam</button>
@@ -252,6 +254,11 @@ async function upload(f, name) {
 $("pick").onclick = () => $("file").click();
 $("file").onchange = (e) => { upload([...e.target.files].find(isPhoto)); e.target.value = ""; };
 
+// What the screen says before there is a photo.
+const EMPTY = '<div class="empty"><b>🎬 Lights. Camera. You.</b>' +
+  "One photo of this room, and three AI agents will turn it into a film starring all of you.</div>";
+$("screen").innerHTML = EMPTY;
+
 let stream = null;
 function camUI(on) {
   $("cam").hidden = on; $("pick").hidden = on;
@@ -261,7 +268,7 @@ function camStop() {
   if (stream) stream.getTracks().forEach((t) => t.stop());
   stream = null; camUI(false);
   if (showing === "camera") { showing = ""; photoAt = null; $("screen").innerHTML =
-    '<div class="empty">No photo yet.</div>'; pollScreen(); }
+    EMPTY; pollScreen(); }
 }
 $("cam").onclick = async () => {
   try {
