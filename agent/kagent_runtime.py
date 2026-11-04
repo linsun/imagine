@@ -1,4 +1,4 @@
-"""Director, Scout and DP as kagent BYO agents -- how they run in k8s/kagent/.
+"""Director, Scout and DP as kagent BYO agents -- how they run in k8s/agents/.
 
 kagent runs each Agent as an Agent Substrate actor, one actor per session
 (A2A contextId), and expects four things of a BYO image (kagent
@@ -18,7 +18,7 @@ and the request plumbing. This file is the executors and the two listeners.
 The A2A 0.3 servers (agent/a2a_server.py, agent/crew.py) stay as they are for
 the laptop.
 
-One Harness runs all three (k8s/kagent/harness.yaml): which agent this is
+One Harness runs all three (k8s/agents/harness.yaml.tmpl): which agent this is
 comes from kagent's config (runtime.name, the Agent's name), or from the
 command line outside kagent.
 

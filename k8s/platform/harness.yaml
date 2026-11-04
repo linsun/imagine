@@ -16,5 +16,5 @@ spec:
   substrate:
     workerPoolRef: {name: kagent-default}
     # Required. gs:// is only the URL shape; on kind the bytes go to the
-    # in-cluster rustfs (same as ../kagent/harness.yaml).
+    # in-cluster rustfs (same as ../agents/harness.yaml.tmpl).
     snapshotPolicy: {location: "gs://ate-snapshots/platform/"}

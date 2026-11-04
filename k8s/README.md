@@ -18,7 +18,7 @@ AirDrop.
 
 - **`default`**: agentgateway, the viewfinder, one WorkerPool (`imagine`, 2
   workers), the kagent Agents, and atespace `default`, which holds every actor.
-  - Director, Scout and DP are kagent Agents (`kagent/`). kagent starts one
+  - Director, Scout and DP are kagent Agents (`agents/`). kagent starts one
     actor per conversation and suspends it when idle.
   - The studio page is a raw Substrate actor (`studio/`) that sleeps until
     you open it.
@@ -28,7 +28,7 @@ AirDrop.
   `default` for the viewfinder, the image model (:3000) and GitHub (:3004).
 - **Provider keys** live only in the `provider-keys` Secrets: agentgateway gets
   all of them, vision-mcp only the Gemini key (Veo goes direct). Actors carry
-  just the virtual key, and their egress policy (`kagent/egress-policy.yaml`)
+  just the virtual key, and their egress policy (`agents/egress-policy.yaml`)
   lets them reach **only** the two gateways and the trace collector.
 
 ## Layout
@@ -38,11 +38,10 @@ AirDrop.
 | `app.yaml` | The viewfinder (`default`) |
 | `workerpool.yaml` | The one WorkerPool, `imagine`: 2 gVisor workers for every actor |
 | `substrate-values.yaml` | Helm values added to kagent's Substrate release: the OTLP endpoint |
-| `agents/` | agentgateway (`default`), through the Gateway API: the Gateway, LLMs, the agents' routes, the token limit. Synced from git by Argo CD |
+| `agents/` | Everything for the imagine agents in `default`: Director, Scout and DP as kagent Agents (`Dockerfile.kagent`), and agentgateway through the Gateway API (the Gateway, LLMs, the agents' routes, GitHub, the token limit). Synced from git by Argo CD, except the Harness template; see `agents/README.md` |
 | `argocd/` | The Argo CD Application for `agents/` (branch `kubecon-na`); `scripts/k8s-argocd.sh` |
-| `kagent/` | Director, Scout and DP as kagent Agents (`Dockerfile.kagent`); see `kagent/README.md` |
 | `studio/` | The web page at :3007 (`kubectl ate proxy`), a raw Substrate actor that sleeps until opened; see `studio/README.md` |
-| `mcp/` | Namespace `mcp`: the MCP gateway (`gateway.yaml`), the MCP servers (`servers.yaml`), Keycloak. Plus `github.yaml`: :3004 GitHub for publish-mcp, on the `default` Gateway |
+| `mcp/` | Namespace `mcp`: the MCP gateway (`gateway.yaml`), the MCP servers (`servers.yaml`), Keycloak |
 | `platform/` | The platform agent (namespace `kagent`): troubleshoots, and changes the token limit by PR; see `platform/README.md` |
 | `RUNBOOK.md` | What `./imagine k8s up` does, step by step, and what to check when something fails on stage |
 

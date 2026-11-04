@@ -41,7 +41,7 @@ A2A = {
 MODEL = os.environ.get("DIRECTOR_MODEL", "director")
 # How the Director talks to Scout and DP. "0.3": A2A 0.3 JSON-RPC, straight to
 # the crew's own servers (laptop, raw Substrate actors). "v1": A2A v1 JSON-RPC,
-# to kagent's A2A endpoint for each crew Agent (k8s/kagent/).
+# to kagent's A2A endpoint for each crew Agent (k8s/agents/).
 CREW_A2A = os.environ.get("CREW_A2A_PROTOCOL", "0.3")
 
 SYSTEM = """You are the Director of a film being made live, on stage, in front

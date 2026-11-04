@@ -253,8 +253,7 @@ kubectl --context $CTX -n $MCP_NS rollout status deploy/keycloak --timeout=300s
 ```bash
 kubectl --context $CTX apply -f k8s/app.yaml                 # viewfinder (default)
 kubectl --context $CTX apply -f k8s/mcp/servers.yaml         # the 5 MCP servers (mcp)
-kubectl --context $CTX apply -f k8s/agents/                  # agentgateway (default): listeners, LLMs, agent routes, token limit
-kubectl --context $CTX apply -f k8s/mcp/github.yaml          # :3004 GitHub for publish-mcp (on the default Gateway)
+kubectl --context $CTX apply -f k8s/agents/                  # default: agentgateway (listeners, LLMs, routes, GitHub, token limit) + the Agents
 kubectl --context $CTX apply -f k8s/mcp/gateway.yaml         # mcp-gateway (mcp): :3001, publish sign-in
 
 # Once only: the phone's old photo inbox on :3005 (the photo now comes by AirDrop)
@@ -323,13 +322,13 @@ to run:
 # One Harness for all three: image (by digest), command, env
 GITHUB_REPO="${GITHUB_REPO:-}" GITHUB_RELEASE_TAG="${GITHUB_RELEASE_TAG:-}" \
   envsubst '${IMAGE} ${AGW_VIRTUAL_KEY} ${GITHUB_REPO} ${GITHUB_RELEASE_TAG}' \
-  < k8s/kagent/harness.yaml | kubectl --context $CTX apply -f -
+  < k8s/agents/harness.yaml.tmpl | kubectl --context $CTX apply -f -
 
 # Once only: the three per-agent Harnesses from before
 kubectl --context $CTX -n $NS delete harness imagine-director imagine-scout imagine-dp --ignore-not-found
 
 # What the actors may reach (the two gateways + the OTel collector), and the Agents themselves
-kubectl --context $CTX apply -f k8s/kagent/egress-policy.yaml -f k8s/kagent/agents.yaml
+kubectl --context $CTX apply -f k8s/agents/egress-policy.yaml -f k8s/agents/agents.yaml
 
 for a in scout dp director; do kubectl --context $CTX -n $NS wait agent/$a --for=condition=Ready --timeout=300s; done
 ```
@@ -441,7 +440,8 @@ Without it every request fails with a CONNECT error in `logs/pf-studio.log`.
 | The viewfinder (`servers/viewfinder.py`) | phase 2 for `imagine-keynote`, then `kubectl rollout restart deploy/viewfinder` |
 | `.env` | `scripts/k8s-env.sh --restart` (just the settings), or `SKIP_BUILD=1 ./imagine k8s up` (everything, incl. keys) |
 | A route or policy in `k8s/agents/` | Commit and push to kubecon-na; Argo CD applies it (`scripts/k8s-argocd.sh sync` to skip the poll). Without Argo CD: `kubectl apply -f` that file. Live, no restart. |
-| `k8s/mcp/github.yaml`, `k8s/mcp/gateway.yaml` | `kubectl apply -f` that file. Live, no restart. |
+| `k8s/agents/harness.yaml.tmpl` | The Harness line in phase 7 (it's a template: never `kubectl apply` it as-is, and Argo CD skips it). New session. |
+| `k8s/mcp/gateway.yaml` | `kubectl apply -f` that file. Live, no restart. |
 | Everything is weird | `./imagine k8s up` |
 
 ## Show: several actors on one worker

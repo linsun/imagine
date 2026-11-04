@@ -8,7 +8,7 @@ preview is opened too (in PREVIEW_BROWSER if set -- Safari, for the iPhone).
 
   DIRECTOR_A2A=http://localhost:3006/director python -m agent.client
 
-With the Director on kagent (k8s/kagent/), set DIRECTOR_A2A_PROTOCOL=v1: the
+With the Director on kagent (k8s/agents/), set DIRECTOR_A2A_PROTOCOL=v1: the
 same turn as an A2A v1 SendStreamingMessage. kagent assigns the contextId (it
 is the session, and so the actor); the client prints it, and DIRECTOR_CONTEXT
 pins it on the next run.

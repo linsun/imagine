@@ -1,6 +1,7 @@
-# Argo CD keeps k8s/agents/ (agentgateway in `default`: the Gateway, the
-# LLMs, the agents' routes, the token limit) in step with git, branch
-# kubecon-na of linsun/imagine (public: no repo credentials needed).
+# Argo CD keeps k8s/agents/ (in `default`: the kagent Agents and their egress
+# policy, agentgateway's Gateway, the LLMs, the routes, GitHub, the token
+# limit) in step with git, branch kubecon-na of linsun/imagine (public: no
+# repo credentials needed).
 #
 # On stage the platform agent changes the token limit by pull request: it edits
 # k8s/agents/token-limit.yaml on a branch, opens the PR, merges it, and asks
@@ -13,6 +14,9 @@
 #   next commit. No prune: deleting a file from git does not delete it here.
 # - Not in k8s/agents/ itself, so the Application never manages itself.
 #   Secrets (provider-keys, the virtual keys) stay with scripts/k8s-up.sh.
+# - The Harness stays with scripts/k8s-up.sh too: harness.yaml.tmpl holds the
+#   per-build image digest and the virtual key. Argo CD reads only
+#   .yaml/.yml/.json, and the exclude below says so out loud.
 #
 #   scripts/k8s-argocd.sh            apply this, then show its state
 #   scripts/k8s-argocd.sh status     synced? to which commit? the live limit
@@ -28,6 +32,8 @@ spec:
     repoURL: https://github.com/linsun/imagine.git
     targetRevision: refs/heads/kubecon-na
     path: k8s/agents
+    directory:
+      exclude: '*.tmpl'
   destination:
     server: https://kubernetes.default.svc
     namespace: default

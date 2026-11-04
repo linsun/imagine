@@ -1,4 +1,7 @@
-# The agents as kagent Agents
+# The agents: kagent Agents and their gateway
+
+Everything here except `harness.yaml.tmpl` is plain YAML that Argo CD syncs
+from git (`../argocd/imagine-agents.yaml`, branch `kubecon-na`).
 
 Director, Scout and DP run through kagent (kagent 1.0.0-rc1,
 `api.kagent.dev/v1alpha3`), in namespace `default`. kagent compiles each Agent
@@ -6,13 +9,18 @@ into an ActorTemplate, starts one actor per session, and owns its lifecycle.
 
 | File | What |
 | --- | --- |
-| `harness.yaml` | The one BYO `Harness` all three share: image (by digest), command, env, pool, snapshots |
+| `harness.yaml.tmpl` | The one BYO `Harness` all three share: image (by digest), command, env, pool, snapshots. A template, filled in and applied by `scripts/k8s-up.sh`; not synced by Argo CD |
 | `egress-policy.yaml` | kagent `EgressPolicy`: the two gateways' ports + the OTel collector, nothing else |
 | `agents.yaml` | The three `Agent`s: the shared Harness + an inline description |
+| `gateway.yaml` | agentgateway (`default`): the Gateway, its listeners, proxy settings, tracing |
+| `models.yaml`, `llm-policy.yaml` | :3000 the LLMs, and who may call them (the agents' virtual key) |
+| `token-limit.yaml` | :3000 how many tokens they get: the demo knob, changed by PR on stage |
+| `routes.yaml` | :3002 Scout, :3003 DP, :3006/director/: the routes to kagent's A2A endpoint |
+| `github.yaml` | :3004 GitHub for publish-mcp, with the real token swapped in |
 
 The worker pool is `../workerpool.yaml` (2 workers, shared with the studio),
 and the routes to kagent's A2A endpoint (:3002, :3003, :3006/director/) are
-`../agents/agents.yaml`.
+`routes.yaml`.
 
 ```bash
 ./imagine k8s up          # builds Dockerfile.kagent, applies this folder
@@ -65,7 +73,7 @@ The laptop still uses them. Scout and DP share their LLM call
   question.
 - **The crew is reached through kagent.** The Director calls Scout and DP
   (`CREW_A2A_PROTOCOL=v1`) at agentgateway :3002 and :3003.
-  `../agents/agents.yaml` sends those to
+  `routes.yaml` sends those to
   `kagent-controller.kagent:8083/agents/default/<name>/`, because kagent picks
   the actor names.
 - **Resources come from kagent's defaults.** A Harness has no CPU or memory

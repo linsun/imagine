@@ -4,11 +4,10 @@
 #   ./imagine k8s up        (or: scripts/k8s-up.sh)
 #
 # Two namespaces:
-#   default   agentgateway (k8s/agents/: LLMs, agents, the token limit;
-#             GitHub in k8s/mcp/github.yaml), the viewfinder (k8s/app.yaml),
-#             the worker pool (k8s/workerpool.yaml), and the agents:
-#             Director, Scout, DP as kagent Agents (k8s/kagent/) and the
-#             studio page as a raw Substrate actor (k8s/studio/). Actors run
+#   default   k8s/agents/: Director, Scout, DP as kagent Agents, and
+#             agentgateway (LLMs, agent routes, GitHub, the token limit); the
+#             viewfinder (k8s/app.yaml), the worker pool (k8s/workerpool.yaml),
+#             and the studio page as a raw Substrate actor (k8s/studio/). Actors run
 #             only while asked something.
 #   mcp       the MCP gateway, the five MCP servers and Keycloak (k8s/mcp/)
 # Plus otel-system: the OTel collector and Jaeger the gateways and the
@@ -164,7 +163,9 @@ k -n "$MCP_NS" rollout status deploy/keycloak --timeout=300s >/dev/null && echo 
 echo "== always-on services"
 k apply -f k8s/app.yaml -f k8s/mcp/servers.yaml >/dev/null
 # The controller pushes route and policy changes live: no restart needed.
-k apply -f k8s/agents/ -f k8s/mcp/github.yaml -f k8s/mcp/gateway.yaml >/dev/null
+# k8s/agents/ includes the Agents, before their Harness exists: they wait,
+# Not Ready, until the agents step below fills in harness.yaml.tmpl.
+k apply -f k8s/agents/ -f k8s/mcp/gateway.yaml >/dev/null
 # With Argo CD installed, k8s/agents/ also syncs from git (branch kubecon-na):
 # a merged PR, such as the platform agent's token-limit change, reaches the
 # cluster with no kubectl. See k8s/argocd/.
@@ -229,8 +230,8 @@ echo "== agents on kagent (namespace $NS)"
 IMAGE="$IMAGE" AGW_VIRTUAL_KEY="$AGW_VIRTUAL_KEY" \
   GITHUB_REPO="${GITHUB_REPO:-}" GITHUB_RELEASE_TAG="${GITHUB_RELEASE_TAG:-}" \
   envsubst '${IMAGE} ${AGW_VIRTUAL_KEY} ${GITHUB_REPO} ${GITHUB_RELEASE_TAG}' \
-  < k8s/kagent/harness.yaml | k apply -f - >/dev/null
-k apply -f k8s/kagent/egress-policy.yaml -f k8s/kagent/agents.yaml >/dev/null
+  < k8s/agents/harness.yaml.tmpl | k apply -f - >/dev/null
+k apply -f k8s/agents/egress-policy.yaml -f k8s/agents/agents.yaml >/dev/null
 # The per-agent Harnesses from before, once no Agent points at them.
 k -n "$NS" delete harness imagine-director imagine-scout imagine-dp --ignore-not-found >/dev/null
 for agent in $AGENTS; do

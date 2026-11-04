@@ -11,6 +11,12 @@
 # tags for BYO), ${AGW_VIRTUAL_KEY}, ${GITHUB_REPO} and ${GITHUB_RELEASE_TAG}
 # are filled in by scripts/k8s-up.sh.
 #
+# A TEMPLATE, hence .tmpl: neither `kubectl apply -f k8s/agents/` nor Argo CD
+# (which reads only .yaml/.yml/.json here) picks it up. Applied as-is it would
+# give the Harness the literal image "${IMAGE}" and break all three agents --
+# and Argo CD re-applies the folder on every merged PR. The digest changes on
+# every build, so it can't live in git; k8s-up.sh owns this file.
+#
 # What kagent adds on its own: KAGENT_CONFIG_JSON and KAGENT_AGENT_CARD_JSON,
 # the gateway trust bundle (SSL_CERT_FILE and friends), OTel resource
 # attributes, the /data durable dir, and the wakeup probe. Substrate allows 32
@@ -37,7 +43,7 @@ spec:
   - {name: AGW_VIRTUAL_KEY, value: "${AGW_VIRTUAL_KEY}"}
   # The Director's alone from here on.
   - {name: AGW_MCP, value: "http://mcp-gateway.mcp.svc.cluster.local:3001/mcp"}
-  # Scout and DP: A2A v1, via ../agents/agents.yaml.
+  # Scout and DP: A2A v1, via routes.yaml.
   - {name: SCOUT_A2A, value: "http://agentgateway.default.svc.cluster.local:3002"}
   - {name: DP_A2A, value: "http://agentgateway.default.svc.cluster.local:3003"}
   - {name: CREW_A2A_PROTOCOL, value: v1}

@@ -5,7 +5,7 @@
 #
 # The Gateway is named `mcp-gateway`, so the controller creates a Deployment
 # and Service named `mcp-gateway` here. The agents call
-# http://mcp-gateway.mcp.svc.cluster.local:3001/mcp (../kagent/harness.yaml).
+# http://mcp-gateway.mcp.svc.cluster.local:3001/mcp (../agents/harness.yaml.tmpl).
 ---
 apiVersion: agentgateway.dev/v1alpha1
 kind: AgentgatewayParameters

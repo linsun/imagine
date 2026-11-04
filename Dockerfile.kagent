@@ -1,4 +1,4 @@
-# The image for the three agents on kagent (k8s/kagent/): Director, Scout, DP
+# The image for the three agents on kagent (k8s/agents/): Director, Scout, DP
 # as BYO Harnesses, all served by agent/kagent_runtime.py.
 #
 # Alpine for the same reason as Dockerfile.agents, though it matters less

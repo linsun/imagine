@@ -15,8 +15,9 @@
 #   models.yaml        :3000 the LLMs (Gemini, OpenAI fallback, image model)
 #   llm-policy.yaml    :3000 who may call the LLMs (the agents' virtual key)
 #   token-limit.yaml   :3000 how many tokens they get -- the demo knob
-#   agents.yaml        :3002 Scout, :3003 DP, :3006/director/ (kagent Agents)
-#   ../mcp/github.yaml :3004 GitHub, with the real token swapped in (this Gateway, kept out of Argo CD)
+#   routes.yaml        :3002 Scout, :3003 DP, :3006/director/ (kagent Agents)
+#   github.yaml        :3004 GitHub, with the real token swapped in
+#   agents.yaml, egress-policy.yaml, harness.yaml.tmpl   the kagent Agents
 #   ../studio/routes.yaml  :3006 what the studio page calls, with CORS
 ---
 # How the controller should run this Gateway's proxy.
@@ -80,7 +81,7 @@ spec:
   - {name: dp, port: 3003, protocol: HTTP, allowedRoutes: {namespaces: {from: Same}}}
   - {name: github, port: 3004, protocol: HTTP, allowedRoutes: {namespaces: {from: Same}}}
   # What the studio page calls (it is served on :3007 by `kubectl ate proxy`,
-  # not by this gateway): the Director at /director/ (agents.yaml), /photo/
+  # not by this gateway): the Director at /director/ (routes.yaml), /photo/
   # and /stage/ (../studio/routes.yaml).
   - {name: studio-api, port: 3006, protocol: HTTP, allowedRoutes: {namespaces: {from: Same}}}
 ---

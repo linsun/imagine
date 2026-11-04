@@ -18,7 +18,7 @@ it. The first request wakes it, and the page opens by saying how long it slept.
 | `routes.yaml` | agentgateway :3006: `/photo/` and `/stage/` → viewfinder, plus CORS for the page |
 
 `/director/` on :3006 goes to kagent; that route is in
-`../agents/agents.yaml`. The actor runs on the same 2 workers as the
+`../agents/routes.yaml`. The actor runs on the same 2 workers as the
 agents (`../workerpool.yaml`).
 
 ## Why it is a raw actor, not a kagent Agent

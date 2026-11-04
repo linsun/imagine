@@ -1,7 +1,7 @@
 # The always-on part of the demo in `default`: the viewfinder (photo inbox +
 # stage page). agentgateway is in agents/, the MCP servers and their
 # gateway in mcp/. The agents -- Director, Scout, DP -- are NOT here: they are
-# kagent Agents (kagent/), Substrate actors that run only while they are being
+# kagent Agents (agents/), Substrate actors that run only while they are being
 # asked something.
 ---
 # ---------------------------------------------------------------- viewfinder
