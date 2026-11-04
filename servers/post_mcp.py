@@ -199,6 +199,15 @@ def _probe(path: str) -> dict:
                 info["fps"] = max(1, round(float(num) / float(den or 1)))
             except ZeroDivisionError:
                 pass
+    # Every credits segment is drawn at the film's size. At 4K (3840x2160)
+    # ffmpeg passes 7 GB within seconds and keeps climbing -- on the cluster it
+    # reached 20 GB and the node's OOM killer stopped it. 720p needs ~1 GB,
+    # 1080p ~2 GB. So anything wider than 1080p is drawn at 1280 wide.
+    if info["width"] > 1920:
+        info["height"] = round(info["height"] * 1280 / info["width"] / 2) * 2
+        info["width"] = 1280
+    # In the log, so a film that renders oddly can be explained afterwards.
+    print(f"post: film {info}", file=sys.stderr, flush=True)
     return info
 
 
