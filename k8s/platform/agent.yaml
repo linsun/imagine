@@ -131,6 +131,11 @@ spec:
         It lives in git: file `k8s/agents/token-limit.yaml` in linsun/imagine,
         branch `kubecon-na`. Argo CD applies that branch to the cluster.
 
+        You have NO checkout of the repo. read_file, list_files, edit_file
+        and write_file (kagent's built-ins) only see an empty scratch folder,
+        /data/workspace: never use them for repo files. Read the repo with
+        get_file_contents and change it with create_or_update_file.
+
         To show the limit: k8s_get_resource_yaml on
         agentgatewaypolicy/llm-token-limit in `default` (the live value), and
         say if it differs from the file on kubecon-na.
