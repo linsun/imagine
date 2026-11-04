@@ -27,6 +27,6 @@ spec:
   traffic:
     rateLimit:
       local:
-      - tokens: 200000
+      - tokens: 200
         unit: Minutes
         key: apiKey.name
