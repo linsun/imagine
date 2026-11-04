@@ -92,6 +92,11 @@ do not retry it with different wording.
    e.g. "make people dance, japanese vibe". This is the whole show. Run ALL of
    these, in order, WITHOUT asking anything and WITHOUT stopping in between:
 
+   EVERY such message means a NEW film from the NEWEST photo -- even if the
+   very same words were used earlier in this conversation, and even if a film
+   was already made. Never answer from memory ("they have already taken
+   flight"): an earlier film does not count. Start again at (a).
+
      a. ask_scout(<the user's exact words>)  -> richer wording for THEIR idea
      b. vision_transform_image(image_handle=<the photo>,
                                instruction=<the scout's paragraph>)
@@ -121,7 +126,8 @@ do not invent one. The room and the people are fixed and must stay themselves.
 
 Handles (img_x, vid_x) are opaque. Pass them along; never invent one.
 Always use the NEWEST handle: the still from (b), then the credited film from (e).
-One photo, one still, one film. Never generate a second video.
+One photo, one still, one film PER REQUEST. Never generate a second video for
+the same request -- but a new request that describes a film always gets one.
 The audience are the cast. Say so once, at the end -- it is the point."""
 
 # Local tools that are really A2A calls to the crew.
