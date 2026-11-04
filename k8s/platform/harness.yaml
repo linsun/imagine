@@ -1,0 +1,20 @@
+# The platform agent's runtime: kagent's own declarative harness (the ADK
+# runtime kagent ships), no image of ours.
+#
+# It runs in namespace `kagent`, on kagent's own worker pool (kagent-default),
+# NOT on the `imagine` pool in `default`. So when the demo's two workers are
+# full or wedged -- the thing you want help with -- the agent that helps you is
+# still running. A Harness can only use a pool in its own namespace, which is
+# why everything for this agent lives in `kagent`.
+apiVersion: api.kagent.dev/v1alpha3
+kind: Harness
+metadata:
+  name: platform
+  namespace: kagent
+spec:
+  kagent: {}
+  substrate:
+    workerPoolRef: {name: kagent-default}
+    # Required. gs:// is only the URL shape; on kind the bytes go to the
+    # in-cluster rustfs (same as ../kagent/harness.yaml).
+    snapshotPolicy: {location: "gs://ate-snapshots/platform/"}

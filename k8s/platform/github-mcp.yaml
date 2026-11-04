@@ -1,0 +1,23 @@
+# GitHub's hosted MCP server, for reading linsun/imagine and opening pull
+# requests against kubecon-na. The token is in the Secret `platform-github`
+# (key `authorization`, value "Bearer <token>"), made by
+# scripts/k8s-platform.sh from PLATFORM_GITHUB_TOKEN (or GITHUB_TOKEN) in .env.
+#
+# Best: a fine-grained token for linsun/imagine only, with
+# Contents: read & write and Pull requests: read & write. Nothing else.
+#
+# kagent infers the egress to api.githubcopilot.com from this reference, and
+# the gateway adds the header: the agent's actor never sees the token.
+apiVersion: api.kagent.dev/v1alpha3
+kind: RemoteMCPServer
+metadata:
+  name: github
+  namespace: kagent
+spec:
+  description: GitHub's hosted MCP server (repos and pull requests), for linsun/imagine
+  protocol: STREAMABLE_HTTP
+  url: https://api.githubcopilot.com/mcp/
+  timeout: 30s
+  headersFrom:
+  - name: Authorization
+    valueFrom: {type: Secret, name: platform-github, key: authorization}
