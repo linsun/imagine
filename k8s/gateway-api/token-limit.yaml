@@ -6,6 +6,12 @@
 # finishes, so the call that crosses the line still completes; the NEXT call
 # gets a 429.
 #
+# Per HOUR, not per minute: the bucket refills all at once, every unit. Per
+# minute, one call gets through each minute and the turn crawls on for minutes
+# before anyone sees a 429. Per hour, the first call empties it and the next
+# one is refused within seconds, every time. (A rehearsal empties it too: the
+# next hour's first call is refused as well.)
+#
 # On stage:
 #   1. Start low. A film turn (Director + Scout + DP) blows through this, so
 #      the crew is refused mid-turn: "the budget that says no".
@@ -28,5 +34,5 @@ spec:
     rateLimit:
       local:
       - tokens: 200
-        unit: Minutes
+        unit: Hours
         key: apiKey.name

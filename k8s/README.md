@@ -72,7 +72,7 @@ upgrade of kagent's Substrate release (`substrate-values.yaml`, `otel.endpoint`)
 
 ## The token limit (demo)
 
-`gateway-api/token-limit.yaml` caps the agents' LLM tokens (2000 per minute,
+`gateway-api/token-limit.yaml` caps the agents' LLM tokens (200 per hour,
 per virtual key). Change it live, with no restart:
 
 ```bash
