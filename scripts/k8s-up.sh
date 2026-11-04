@@ -4,12 +4,12 @@
 #   ./imagine k8s up        (or: scripts/k8s-up.sh)
 #
 # Two namespaces:
-#   default   agentgateway (k8s/gateway-api/: LLMs, agents, GitHub,
-#             studio), the viewfinder (k8s/app.yaml), the worker pool
-#             (k8s/workerpool.yaml), and the agents: Director, Scout, DP as
-#             kagent Agents (k8s/kagent/) and the studio page as a raw
-#             Substrate actor (k8s/studio/). Actors run only while asked
-#             something.
+#   default   agentgateway (k8s/agents/: LLMs, agents, the token limit;
+#             GitHub in k8s/mcp/github.yaml), the viewfinder (k8s/app.yaml),
+#             the worker pool (k8s/workerpool.yaml), and the agents:
+#             Director, Scout, DP as kagent Agents (k8s/kagent/) and the
+#             studio page as a raw Substrate actor (k8s/studio/). Actors run
+#             only while asked something.
 #   mcp       the MCP gateway, the five MCP servers and Keycloak (k8s/mcp/)
 # Plus otel-system: the OTel collector and Jaeger the gateways and the
 # Director send traces to (Substrate's kind manifest).
@@ -164,7 +164,13 @@ k -n "$MCP_NS" rollout status deploy/keycloak --timeout=300s >/dev/null && echo 
 echo "== always-on services"
 k apply -f k8s/app.yaml -f k8s/mcp/servers.yaml >/dev/null
 # The controller pushes route and policy changes live: no restart needed.
-k apply -f k8s/gateway-api/ -f k8s/mcp/gateway.yaml >/dev/null
+k apply -f k8s/agents/ -f k8s/mcp/github.yaml -f k8s/mcp/gateway.yaml >/dev/null
+# With Argo CD installed, k8s/agents/ also syncs from git (branch kubecon-na):
+# a merged PR, such as the platform agent's token-limit change, reaches the
+# cluster with no kubectl. See k8s/argocd/.
+if k get namespace argocd >/dev/null 2>&1; then
+  k apply -f k8s/argocd/imagine-agents.yaml >/dev/null && echo "   argocd: imagine-agents syncs k8s/agents/ from kubecon-na"
+fi
 # Once only: the phone's photo inbox on :3005, gone now that the photo comes
 # by AirDrop and a drop on the studio page (:3006/photo/upload).
 k -n "$NS" delete httproute photo-upload photo-inbox-page --ignore-not-found >/dev/null

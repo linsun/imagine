@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # The platform agent (k8s/platform/): kagent's declarative runtime, in
 # namespace `kagent`, on kagent's own worker pool. It troubleshoots the demo,
-# raises the LLM token limit when asked, and opens PRs against
+# changes the LLM token limit by PR when asked (merged into kubecon-na, then
+# synced by Argo CD: scripts/k8s-argocd.sh), and opens fix PRs against
 # linsun/imagine kubecon-na.
 #
 #   scripts/k8s-platform.sh            apply it (and the GitHub token Secret)
@@ -49,5 +50,5 @@ status
 echo
 echo "Talk to it in the kagent UI (agent kagent/platform), e.g.:"
 echo "  why did the last film fail?"
-echo "  raise the token limit to 500000"
+echo "  raise the token limit to 200000   (PR, merge: approve it, Argo CD syncs)"
 echo "  open a PR that fixes it"

@@ -6,7 +6,7 @@
 #
 #   /photo/...   the photo inbox   -> viewfinder (/latest, /latest.jpg, /upload)
 #   /stage/...   the projector     -> viewfinder (/stage/state, /stage/media)
-#   /director/   the Director      -> kagent (in ../gateway-api/agents.yaml)
+#   /director/   the Director      -> kagent (in ../agents/agents.yaml)
 #
 # Only port-forwarded to 127.0.0.1 (scripts/k8s-pf.sh), so these routes carry
 # no inbox key: the page is for the laptop on stage, not the venue wifi.

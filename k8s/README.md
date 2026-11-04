@@ -38,10 +38,12 @@ AirDrop.
 | `app.yaml` | The viewfinder (`default`) |
 | `workerpool.yaml` | The one WorkerPool, `imagine`: 2 gVisor workers for every actor |
 | `substrate-values.yaml` | Helm values added to kagent's Substrate release: the OTLP endpoint |
-| `gateway-api/` | agentgateway (`default`), through the Gateway API: LLMs, agents, GitHub, photos, studio |
+| `agents/` | agentgateway (`default`), through the Gateway API: the Gateway, LLMs, the agents' routes, the token limit. Synced from git by Argo CD |
+| `argocd/` | The Argo CD Application for `agents/` (branch `kubecon-na`); `scripts/k8s-argocd.sh` |
 | `kagent/` | Director, Scout and DP as kagent Agents (`Dockerfile.kagent`); see `kagent/README.md` |
 | `studio/` | The web page at :3007 (`kubectl ate proxy`), a raw Substrate actor that sleeps until opened; see `studio/README.md` |
-| `mcp/` | Namespace `mcp`: the MCP gateway (`gateway.yaml`), the MCP servers (`servers.yaml`), Keycloak |
+| `mcp/` | Namespace `mcp`: the MCP gateway (`gateway.yaml`), the MCP servers (`servers.yaml`), Keycloak. Plus `github.yaml`: :3004 GitHub for publish-mcp, on the `default` Gateway |
+| `platform/` | The platform agent (namespace `kagent`): troubleshoots, and changes the token limit by PR; see `platform/README.md` |
 | `RUNBOOK.md` | What `./imagine k8s up` does, step by step, and what to check when something fails on stage |
 
 ## Bring it up
@@ -72,14 +74,26 @@ upgrade of kagent's Substrate release (`substrate-values.yaml`, `otel.endpoint`)
 
 ## The token limit (demo)
 
-`gateway-api/token-limit.yaml` caps the agents' LLM tokens (200 per hour,
-per virtual key). Change it live, with no restart:
+`agents/token-limit.yaml` caps the agents' LLM tokens (200 per hour,
+per virtual key). On stage it changes through git:
+
+1. Ask the platform agent (kagent UI, `kagent/platform`): "raise the token
+   limit to 200000".
+2. It edits `k8s/agents/token-limit.yaml` on a `platform-agent/...` branch,
+   opens a PR against `kubecon-na`, and merges it once you approve the merge
+   in the kagent UI.
+3. It asks Argo CD to refresh (`imagine-agents`); Argo CD applies the new
+   commit and the agentgateway controller pushes it to the proxy. It reads
+   the limit back to confirm.
 
 ```bash
-scripts/token-limit.sh            # show
-scripts/token-limit.sh 200000     # raise it on stage
-scripts/token-limit.sh reset      # back to the file
+scripts/k8s-argocd.sh status      # Synced? at which commit? the live limit
+scripts/k8s-argocd.sh sync        # if Argo CD hasn't picked it up yet
+scripts/token-limit.sh 200000     # fallback, no git: live until the next commit
 ```
+
+After the show, kubecon-na holds the raised limit: put 200 back (a commit,
+or ask the agent for another PR) and `git pull` before the next rehearsal.
 
 ## Actors and workers
 

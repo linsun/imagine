@@ -16,7 +16,7 @@
 #   llm-policy.yaml    :3000 who may call the LLMs (the agents' virtual key)
 #   token-limit.yaml   :3000 how many tokens they get -- the demo knob
 #   agents.yaml        :3002 Scout, :3003 DP, :3006/director/ (kagent Agents)
-#   github.yaml        :3004 GitHub, with the real token swapped in
+#   ../mcp/github.yaml :3004 GitHub, with the real token swapped in (this Gateway, kept out of Argo CD)
 #   ../studio/routes.yaml  :3006 what the studio page calls, with CORS
 ---
 # How the controller should run this Gateway's proxy.

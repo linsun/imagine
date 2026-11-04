@@ -12,7 +12,7 @@ into an ActorTemplate, starts one actor per session, and owns its lifecycle.
 
 The worker pool is `../workerpool.yaml` (2 workers, shared with the studio),
 and the routes to kagent's A2A endpoint (:3002, :3003, :3006/director/) are
-`../gateway-api/agents.yaml`.
+`../agents/agents.yaml`.
 
 ```bash
 ./imagine k8s up          # builds Dockerfile.kagent, applies this folder
@@ -65,7 +65,7 @@ The laptop still uses them. Scout and DP share their LLM call
   question.
 - **The crew is reached through kagent.** The Director calls Scout and DP
   (`CREW_A2A_PROTOCOL=v1`) at agentgateway :3002 and :3003.
-  `../gateway-api/agents.yaml` sends those to
+  `../agents/agents.yaml` sends those to
   `kagent-controller.kagent:8083/agents/default/<name>/`, because kagent picks
   the actor names.
 - **Resources come from kagent's defaults.** A Harness has no CPU or memory

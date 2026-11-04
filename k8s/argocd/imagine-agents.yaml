@@ -1,0 +1,37 @@
+# Argo CD keeps k8s/agents/ (agentgateway in `default`: the Gateway, the
+# LLMs, the agents' routes, the token limit) in step with git, branch
+# kubecon-na of linsun/imagine (public: no repo credentials needed).
+#
+# On stage the platform agent changes the token limit by pull request: it edits
+# k8s/agents/token-limit.yaml on a branch, opens the PR, merges it, and asks
+# Argo CD to refresh. Argo CD sees the new commit and applies it; the
+# agentgateway controller pushes it to the proxy. No kubectl.
+#
+# - targetRevision is the full ref: the repo has a TAG named kubecon-na too.
+# - Automated sync, no selfHeal: a new commit is applied at once, but a live
+#   change (scripts/token-limit.sh, the fallback) is not undone until the
+#   next commit. No prune: deleting a file from git does not delete it here.
+# - Not in k8s/agents/ itself, so the Application never manages itself.
+#   Secrets (provider-keys, the virtual keys) stay with scripts/k8s-up.sh.
+#
+#   scripts/k8s-argocd.sh            apply this, then show its state
+#   scripts/k8s-argocd.sh status     synced? to which commit? the live limit
+#   scripts/k8s-argocd.sh sync       refresh now instead of on the ~3 min poll
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: imagine-agents
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/linsun/imagine.git
+    targetRevision: refs/heads/kubecon-na
+    path: k8s/agents
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: false

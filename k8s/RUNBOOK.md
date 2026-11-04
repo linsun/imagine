@@ -253,7 +253,8 @@ kubectl --context $CTX -n $MCP_NS rollout status deploy/keycloak --timeout=300s
 ```bash
 kubectl --context $CTX apply -f k8s/app.yaml                 # viewfinder (default)
 kubectl --context $CTX apply -f k8s/mcp/servers.yaml         # the 5 MCP servers (mcp)
-kubectl --context $CTX apply -f k8s/gateway-api/             # agentgateway (default): listeners, routes, policies
+kubectl --context $CTX apply -f k8s/agents/                  # agentgateway (default): listeners, LLMs, agent routes, token limit
+kubectl --context $CTX apply -f k8s/mcp/github.yaml          # :3004 GitHub for publish-mcp (on the default Gateway)
 kubectl --context $CTX apply -f k8s/mcp/gateway.yaml         # mcp-gateway (mcp): :3001, publish sign-in
 
 # Once only: the phone's old photo inbox on :3005 (the photo now comes by AirDrop)
@@ -286,6 +287,23 @@ kubectl --context $CTX -n $MCP_NS rollout status deploy/mcp-gateway deploy/camer
 The `agentgateway` and `mcp-gateway` Deployments are created by the controller
 from their Gateways, not applied by us. Route and policy changes reach them
 live, without a restart.
+
+## 6b. Argo CD for `k8s/agents/` (optional)
+
+With Argo CD in namespace `argocd`, `k8s-up.sh` also applies
+`k8s/argocd/imagine-agents.yaml`. From then on `k8s/agents/` follows git,
+branch `kubecon-na` (`refs/heads/kubecon-na`: there is a tag of that name
+too). Argo CD reads the pushed branch, not this checkout, so push first.
+
+```bash
+scripts/k8s-argocd.sh            # apply the Application, then status
+scripts/k8s-argocd.sh status     # Synced? at which commit? the live limit
+scripts/k8s-argocd.sh sync       # refresh now instead of on the ~3 min poll
+scripts/k8s-argocd.sh ui         # https://localhost:8443, user admin
+```
+
+Automated sync, no selfHeal, no prune. A new commit is applied at once; a
+live `kubectl` or `scripts/token-limit.sh` change stays until the next commit.
 
 ## 7. Workers and the agents on kagent
 
@@ -422,7 +440,8 @@ Without it every request fails with a CONNECT error in `logs/pf-studio.log`.
 | An MCP server (`servers/`, `mcp-server`) | phase 2 for that image, then `kubectl -n mcp rollout restart deploy/<name>` |
 | The viewfinder (`servers/viewfinder.py`) | phase 2 for `imagine-keynote`, then `kubectl rollout restart deploy/viewfinder` |
 | `.env` | `scripts/k8s-env.sh --restart` (just the settings), or `SKIP_BUILD=1 ./imagine k8s up` (everything, incl. keys) |
-| A route or policy (`k8s/gateway-api/`, `k8s/mcp/gateway.yaml`) | `kubectl apply -f` that file. Live, no restart. |
+| A route or policy in `k8s/agents/` | Commit and push to kubecon-na; Argo CD applies it (`scripts/k8s-argocd.sh sync` to skip the poll). Without Argo CD: `kubectl apply -f` that file. Live, no restart. |
+| `k8s/mcp/github.yaml`, `k8s/mcp/gateway.yaml` | `kubectl apply -f` that file. Live, no restart. |
 | Everything is weird | `./imagine k8s up` |
 
 ## Show: several actors on one worker
@@ -496,6 +515,7 @@ being hit:
 
 ```bash
 scripts/token-limit.sh               # current limit
+scripts/k8s-argocd.sh status         # what git says, and whether Argo CD applied it
 scripts/token-limit.sh reset         # back to the file's value
 kubectl --context $CTX -n $NS logs deploy/agentgateway --tail=50 | grep -i 'rate\|429'
 ```

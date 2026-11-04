@@ -37,7 +37,7 @@ spec:
   - {name: AGW_VIRTUAL_KEY, value: "${AGW_VIRTUAL_KEY}"}
   # The Director's alone from here on.
   - {name: AGW_MCP, value: "http://mcp-gateway.mcp.svc.cluster.local:3001/mcp"}
-  # Scout and DP: A2A v1, via ../gateway-api/agents.yaml.
+  # Scout and DP: A2A v1, via ../agents/agents.yaml.
   - {name: SCOUT_A2A, value: "http://agentgateway.default.svc.cluster.local:3002"}
   - {name: DP_A2A, value: "http://agentgateway.default.svc.cluster.local:3003"}
   - {name: CREW_A2A_PROTOCOL, value: v1}

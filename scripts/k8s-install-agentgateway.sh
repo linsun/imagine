@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Install the Gateway API and agentgateway's controller into the kind cluster,
-# so k8s/gateway-api/ can program agentgateway. Run once per cluster, before
+# so k8s/agents/ can program agentgateway. Run once per cluster, before
 # scripts/k8s-up.sh. Safe to re-run.
 #
 #   KIND_CLUSTER        kind cluster name (default: kind)

@@ -15,9 +15,13 @@
 # On stage:
 #   1. Start low. A film turn (Director + Scout + DP) blows through this, so
 #      the crew is refused mid-turn: "the budget that says no".
-#   2. Raise it live -- no restart, the controller pushes the change:
-#        scripts/token-limit.sh 200000          # or edit below and kubectl apply
+#   2. Raise it by PR: ask the platform agent (../platform/) "raise the token
+#      limit to 200000". It changes `tokens:` below on a branch, opens a PR
+#      against kubecon-na, merges it, and Argo CD (../argocd/) applies it. The
+#      controller pushes it to the proxy: no restart.
+#      Fallback, no git: scripts/token-limit.sh 200000
 #   3. Say "make them dance" again. It goes through.
+#   4. After the show, set it back to 200 on kubecon-na.
 #
 # Replaces the `tripwire` budget in the laptop's ../../gateway/config.yaml (200000 tokens per
 # rolling 24h). The Kubernetes API has no rolling-day window or USD budget

@@ -1,6 +1,6 @@
 # The MCP gateway, in `mcp`: a second agentgateway, only for tools. :3001 is
 # one MCP endpoint (/mcp) in front of the five MCP servers (servers.yaml),
-# plus "publish needs a signed-in user". The main gateway (../gateway-api/)
+# plus "publish needs a signed-in user". The main gateway (../agents/)
 # keeps the LLMs, the agents, GitHub and the photo inbox.
 #
 # The Gateway is named `mcp-gateway`, so the controller creates a Deployment
