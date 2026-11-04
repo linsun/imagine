@@ -337,6 +337,19 @@ A new image digest means a new template, so **existing sessions keep the old
 code**. Click "new session" on the studio page (or restart `./imagine k8s demo`)
 to get the new code.
 
+kagent deletes neither the old session actors nor the old templates, so they
+pile up (three templates per agent after three rebuilds). Clear them out after
+"new session":
+
+```bash
+KIND_CLUSTER=kagent scripts/k8s-clean-sessions.sh             # lists, then asks
+KIND_CLUSTER=kagent scripts/k8s-clean-sessions.sh --running   # and stale RUNNING sessions
+```
+
+It deletes suspended session actors on an old template (`--all`: every
+suspended session actor), and old templates nothing uses. It never touches the
+newest template of each agent, or the studio.
+
 ## 8. The studio (a raw Substrate actor)
 
 ```bash
@@ -421,9 +434,17 @@ kubectl ate --context $CTX get actors -a $NS      # WORKER POD column: which wor
 
 With 2 workers, the studio plus a film (Director, Scout, DP) means at least
 two actors share a worker. Each kagent actor books 1 CPU / 1Gi of a worker's
-2 CPU / 2Gi, so a worker holds two of them. Old sessions left RUNNING take
-room too; if an actor can't be placed ("no worker room"), suspend the stale
-ones:
+2 CPU / 2Gi (1984Mi usable), so a worker holds ONE of them, next to the
+studio's 500m / 256Mi: the studio, the Director and one crew member fill both
+workers. Old sessions left RUNNING take room too. If an actor can't be placed, the Director shows "input was not
+accepted; retry after the session becomes available" and the atenet router
+logs "no worker has room for the actor". Clear the stale sessions:
+
+```bash
+KIND_CLUSTER=kagent scripts/k8s-clean-sessions.sh --running
+```
+
+or suspend one by hand:
 
 ```bash
 kubectl ate --context $CTX suspend actor <session-…> -a $NS
