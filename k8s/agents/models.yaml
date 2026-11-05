@@ -68,7 +68,8 @@ spec:
       - {modelRef: {name: director-primary}, priority: 0}
       - {modelRef: {name: director-fallback}, priority: 1}
 ---
-# The image model vision-mcp paints with, under its own name...
+# The image models vision-mcp can paint with, each under its own name.
+# Nano Banana (the original), kept to switch back to.
 apiVersion: agentgateway.dev/v1alpha1
 kind: AgentgatewayModel
 metadata:
@@ -85,7 +86,25 @@ spec:
       location:
         header: {name: x-goog-api-key}
 ---
-# ...and as "nano-banana".
+# Nano Banana 2, the one vision-mcp uses now.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayModel
+metadata:
+  name: gemini-3-1-flash-image
+  namespace: default
+spec:
+  parentRefs:
+  - {name: agentgateway, sectionName: llm}
+  match: {model: gemini-3.1-flash-image}
+  provider: Gemini
+  policies:
+    auth:
+      secretRef: {name: provider-keys, key: GEMINI_API_KEY}
+      location:
+        header: {name: x-goog-api-key}
+---
+# ...and as "nano-banana", the name vision-mcp asks for (IMAGE_MODEL). Change
+# the model here, not in .env: modelRef gemini-2-5-flash-image goes back.
 apiVersion: agentgateway.dev/v1alpha1
 kind: AgentgatewayModel
 metadata:
@@ -97,4 +116,4 @@ spec:
   virtualModel:
     weighted:
       targets:
-      - modelRef: {name: gemini-2-5-flash-image}
+      - modelRef: {name: gemini-3-1-flash-image}
