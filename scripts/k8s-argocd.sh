@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Argo CD for k8s/agents/ (k8s/argocd/imagine-agents.yaml): git branch
+# Argo CD for k8s/agents/ (k8s/argocd/imagine.yaml): git branch
 # kubecon-na is the source of truth, so a merged PR -- the platform agent's
 # token-limit change -- reaches the cluster with no kubectl.
 #
@@ -12,7 +12,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 CTX=kind-${KIND_CLUSTER:-kind}
-APP=imagine-agents
+APP=imagine
 k() { kubectl --context "$CTX" "$@"; }
 
 status() {
@@ -29,7 +29,7 @@ status() {
 
 k get namespace argocd >/dev/null 2>&1 || { echo "Argo CD is not installed (namespace argocd)"; exit 1; }
 case "${1:-up}" in
-  up) k apply -f k8s/argocd/imagine-agents.yaml >/dev/null; status ;;
+  up) k apply -f k8s/argocd/imagine.yaml >/dev/null; status ;;
   status) status ;;
   sync)
     k -n argocd annotate application "$APP" argocd.argoproj.io/refresh=normal --overwrite >/dev/null

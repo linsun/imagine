@@ -1,7 +1,7 @@
 # The agents: kagent Agents and their gateway
 
 Everything here except `harness.yaml.tmpl` is plain YAML that Argo CD syncs
-from git (`../argocd/imagine-agents.yaml`, branch `kubecon-na`).
+from git (`../argocd/imagine.yaml`, branch `kubecon-na`).
 
 Director, Scout and DP run through kagent (kagent 1.0.0-rc1,
 `api.kagent.dev/v1alpha3`), in namespace `default`. kagent compiles each Agent

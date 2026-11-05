@@ -24,7 +24,7 @@ if [ "${1:-}" = "--purge" ]; then
   k -n default delete harness imagine --ignore-not-found
   # Argo CD first, or it would put k8s/agents/ back on the next commit. No
   # resources-finalizer, so this deletes only the Application.
-  k -n argocd delete application imagine-agents --ignore-not-found 2>/dev/null
+  k -n argocd delete application imagine --ignore-not-found 2>/dev/null
   ate delete actor studio -a default 2>/dev/null
   ate delete actor-template studio -a default 2>/dev/null
   k delete -f k8s/studio/routes.yaml -f k8s/agents/ -f k8s/app.yaml -f k8s/workerpool.yaml --ignore-not-found

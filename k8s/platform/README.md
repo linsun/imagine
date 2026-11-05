@@ -24,7 +24,7 @@ What it may do:
   open a PR against `kubecon-na`. It never pushes to `kubecon-na` itself,
   and has no merge tool: every PR is yours to review and merge.
 - **Refresh Argo CD** (`k8s_annotate_resource`, no approval): only
-  `argocd.argoproj.io/refresh` on the `imagine-agents` Application.
+  `argocd.argoproj.io/refresh` on the `imagine` Application.
 
 ## The token limit, by pull request
 
@@ -34,7 +34,7 @@ What it may do:
    `tokens:` on branch `platform-agent/token-limit-200000`, opens a PR, and
    replies with the PR URL.
 2. **You merge it** on GitHub, then tell the agent "merged".
-3. It annotates the Argo CD Application `imagine-agents` to refresh, so Argo
+3. It annotates the Argo CD Application `imagine` to refresh, so Argo
    CD applies the merge commit in seconds rather than on its ~3 minute poll,
    then reads back the live `llm-token-limit` and replies with it.
 
@@ -42,7 +42,7 @@ If GitHub or Argo CD fails, it offers the old way: a direct patch of
 `llm-token-limit` (approval needed), which leaves git and the cluster apart
 until the next commit. `scripts/k8s-argocd.sh status` shows both sides.
 
-Needs: Argo CD with `k8s/argocd/imagine-agents.yaml` applied
+Needs: Argo CD with `k8s/argocd/imagine.yaml` applied
 (`scripts/k8s-argocd.sh`), the `k8s/agents/` layout pushed to `kubecon-na`,
 and a GitHub token with Contents and Pull requests read & write.
 After the show `kubecon-na` holds the raised limit: ask for "reset it" (200)

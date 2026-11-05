@@ -105,7 +105,7 @@ spec:
         - namespace `ate-system`: Substrate (ate-controller).
         - namespace `otel-system`: OTel collector and Jaeger.
         - namespace `agentgateway-system`: the agentgateway controller.
-        - namespace `argocd`: Argo CD. Application `imagine-agents` syncs
+        - namespace `argocd`: Argo CD. Application `imagine` syncs
           repo path `k8s/agents/` (branch kubecon-na) to `default`:
           automated, no selfHeal, no prune.
 
@@ -164,7 +164,7 @@ spec:
            servers in `mcp`.
         2. Common causes:
            - 429 from :3000: token limit spent. Offer to raise it (by PR).
-           - Argo CD application `imagine-agents` OutOfSync or sync failed:
+           - Argo CD application `imagine` OutOfSync or sync failed:
              read status.operationState.message; a merged PR with bad YAML
              shows there. The fix is another PR.
            - "no worker has room for the actor", actors stuck pending: stale

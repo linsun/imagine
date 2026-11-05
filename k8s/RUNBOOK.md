@@ -290,7 +290,7 @@ live, without a restart.
 ## 6b. Argo CD for `k8s/agents/` (optional)
 
 With Argo CD in namespace `argocd`, `k8s-up.sh` also applies
-`k8s/argocd/imagine-agents.yaml`. From then on `k8s/agents/` follows git,
+`k8s/argocd/imagine.yaml`. From then on `k8s/agents/` follows git,
 branch `kubecon-na` (`refs/heads/kubecon-na`: there is a tag of that name
 too). Argo CD reads the pushed branch, not this checkout, so push first.
 

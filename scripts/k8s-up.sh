@@ -170,7 +170,7 @@ k apply -f k8s/agents/ -f k8s/mcp/gateway.yaml >/dev/null
 # a merged PR, such as the platform agent's token-limit change, reaches the
 # cluster with no kubectl. See k8s/argocd/.
 if k get namespace argocd >/dev/null 2>&1; then
-  k apply -f k8s/argocd/imagine-agents.yaml >/dev/null && echo "   argocd: imagine-agents syncs k8s/agents/ from kubecon-na"
+  k apply -f k8s/argocd/imagine.yaml >/dev/null && echo "   argocd: imagine syncs k8s/agents/ from kubecon-na"
 fi
 # Once only: the phone's photo inbox on :3005, gone now that the photo comes
 # by AirDrop and a drop on the studio page (:3006/photo/upload).
