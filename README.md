@@ -193,3 +193,4 @@ demo path needs none of them.
 `mcp-server` (your existing vision-mcp) is reused unchanged except for
 `genai_client.py`, which now honours `GEMINI_BASE_URL`.
 
+<!-- Test PR opened by kagent platform agent. -->
