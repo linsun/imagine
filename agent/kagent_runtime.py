@@ -163,22 +163,25 @@ class DirectorExecutor(_Executor):
         tmp.replace(STATE)            # atomic: a suspend mid-write keeps the old one
 
     async def run(self, text: str, headers: dict, emit) -> str:
-        d = await self._get()
-        # The signed-in person, if any: kagent passes the caller's
-        # Authorization through. The gateway binds identity when the MCP
-        # session connects, so a new identity means reconnecting.
-        authz = headers.get("authorization", "")
-        if auth.use_forwarded(authz[7:] if authz.lower().startswith("bearer ") else ""):
-            await tools.reset()
-        d.emit = emit
+        # Join the caller's trace first, so the MCP (re)connect below --
+        # initialize, tools/list -- lands in it too, not in a trace of its own.
         trace = {k: v for k, v in headers.items() if k in ("traceparent", "tracestate")}
         try:
             with tracing.continue_from(trace):
+                d = await self._get()
+                # The signed-in person, if any: kagent passes the caller's
+                # Authorization through. The gateway binds identity when the
+                # MCP session connects, so a new identity means reconnecting.
+                authz = headers.get("authorization", "")
+                if auth.use_forwarded(authz[7:] if authz.lower().startswith("bearer ") else ""):
+                    await tools.reset()
+                d.emit = emit
                 if re.search(r"\bpublish\b", text.lower()):
                     return await d.publish_again()
                 return await d.turn(text)
         finally:
-            await asyncio.to_thread(self._save)
+            if self.director is not None:     # None if _get() itself failed
+                await asyncio.to_thread(self._save)
             # Spans are batched; send this turn's now, before a suspend.
             await asyncio.to_thread(tracing.flush)
 

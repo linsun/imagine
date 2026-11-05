@@ -1,0 +1,173 @@
+# The OTel collector's config (otel-system), from Substrate's kind install
+# (manifests/ate-install/kind/otel-collector.yaml), plus one change for the
+# demo: two filters before Jaeger. filter/ateapi-authz drops Substrate's
+# authorization-check spans; filter/a2a-sdk drops the a2a SDK's internal
+# spans, which otherwise make a second trace for every agent message.
+#
+# Every actor resume, create or route makes ateapi run OpenFGA Checks against
+# Postgres, and each Check emits ~40 spans (ResolveCheck, checkDirect*,
+# checkTTU, postgres.Read*, SELECT tuple). In one film turn that was 820 of
+# the trace's 893 spans. The filter keeps the Check span itself (one per
+# check, with its duration) and drops everything under it.
+#
+# Apply (the collector reads its config only at start):
+#   kubectl -n otel-system create configmap opentelemetry-collector-config \
+#     --from-file=otel-collector-config.yaml=k8s/otel/collector-config.yaml \
+#     --dry-run=client -o yaml | kubectl apply -f -
+#   kubectl -n otel-system rollout restart deploy/opentelemetry-collector
+#
+# Undo: delete filter/ateapi-authz from the traces pipeline and apply again.
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+processors:
+  batch:
+
+  # Substrate's authorization checks, below each OpenFGA Check span. A span
+  # matching any line is dropped. Only service ateapi; only the traces
+  # pipeline (traces/count still counts them).
+  filter/ateapi-authz:
+    error_mode: ignore
+    traces:
+      span:
+        - resource.attributes["service.name"] == "ateapi" and instrumentation_scope.name == "internal/graph/check"
+        - resource.attributes["service.name"] == "ateapi" and instrumentation_scope.name == "openfga/pkg/typesystem"
+        - resource.attributes["service.name"] == "ateapi" and instrumentation_scope.name == "openfga/pkg/storage/postgres"
+        - resource.attributes["service.name"] == "ateapi" and instrumentation_scope.name == "pkg/storage/sqlcommon"
+        - resource.attributes["service.name"] == "ateapi" and instrumentation_scope.name == "atepg" and (name == "SELECT tuple" or name == "SET")
+
+  # The a2a SDK's own decorator spans in the agents (request handler, event
+  # queue plumbing: a2a.server.*). They start before the runtime picks up the
+  # caller's traceparent, so they land in a trace of their own -- the
+  # "second trace" for every Director message. The agents' real work
+  # (director.turn, tool:*, LLM, MCP, crew calls) is already in the caller's
+  # trace and is kept.
+  filter/a2a-sdk:
+    error_mode: ignore
+    traces:
+      span:
+        - instrumentation_scope.name == "a2a-python-sdk"
+
+  # The count connector below sends deltas, and the Prometheus exporter
+  # reads the new start timestamp of each batch as a reset. Without
+  # deltatocumulative the counts do not accumulate and each scrape shows
+  # only the last batch.
+  #
+  # max_streams bounds the memory. A stream is for each process and
+  # count, and not for each service, because serverboot gives each
+  # process its own service.instance.id. Above the limit new streams drop
+  # with no log line and the totals become too low.
+  deltatocumulative:
+    max_streams: 10000
+
+# The volume of telemetry for each service, the same two counts that
+# benchmarking/telemetry/meter.yaml gives on GKE. On GKE the managed
+# collector cannot hold a connector, thus a measurement there needs a
+# second collector in front of it. Here the collector is ours, thus the
+# counts belong in it and kind needs no meter.
+connectors:
+  count:
+    spans:
+      substrate_spans:
+        description: Spans received, by emitting service.
+        attributes:
+          # The connector reads each key from the attributes of the item,
+          # then the scope, then the resource, thus service.name resolves
+          # from the resource with no transform in front of it. The
+          # Prometheus exporter writes the key as service_name.
+          #
+          # Without a default value the connector removes each item that
+          # has no service.name from the count. The item does not show as
+          # unknown, and the totals are too low with no error message.
+          - key: service.name
+            default_value: unknown
+    datapoints:
+      substrate_datapoints:
+        description: Metric datapoints received, by emitting service.
+        attributes:
+          - key: service.name
+            default_value: unknown
+
+    # The actor lifecycle events. The key is ate.actor.state and not the
+    # event name: the connector reads the attributes of the item, and the
+    # event name is a top level field of the record, which would need a
+    # transform in front of this. The state is bounded and is the more
+    # useful of the two anyway.
+    logs:
+      substrate_actor_state_changes:
+        description: Actor state change events received, by state.
+        attributes:
+          - key: service.name
+            default_value: unknown
+          # No default: drops workload logs, which have no such key.
+          - key: ate.actor.state
+
+exporters:
+  otlp/jaeger:
+    endpoint: jaeger.otel-system.svc.cluster.local:4317
+    tls:
+      insecure: true
+  prometheus:
+    endpoint: 0.0.0.0:8889
+  debug:
+    verbosity: detailed
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [filter/ateapi-authz, filter/a2a-sdk, batch]
+      exporters: [otlp/jaeger, debug]
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [prometheus, debug]
+
+    # Every ate event, plus any workload that sends OTLP logs. debug is the
+    # only exporter: kind has no log store, and the e2e read-back goes
+    # through the count connector below. Never put a sampler or a filter
+    # here. A consumer takes the last event for an actor, thus a dropped
+    # record reports a stale state with no sign that anything is missing.
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug]
+
+    # The count pipelines read the same receiver as the pipelines above,
+    # and they only count. The connector declares MutatesData false, thus
+    # it changes nothing that reaches Jaeger or Prometheus.
+    traces/count:
+      receivers: [otlp]
+      exporters: [count]
+    metrics/count:
+      receivers: [otlp]
+      exporters: [count]
+    logs/count:
+      receivers: [otlp]
+      exporters: [count]
+
+    # The counts that the connector makes, out to the Prometheus exporter.
+    metrics/count-out:
+      receivers: [count]
+      processors: [deltatocumulative]
+      exporters: [prometheus]
+
+  # The otelcol_* counters of the collector itself. A service that reports
+  # zero volume gives no data by itself: otelcol_receiver_accepted_* shows
+  # the difference between a service that sent nothing and data that never
+  # arrived. The default reader binds to localhost, thus give the address
+  # of each interface so the Prometheus pod can reach it.
+  #
+  # The level stays at the default. It already gives each counter above,
+  # and detailed adds histograms only, which no query here reads.
+  telemetry:
+    metrics:
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: 0.0.0.0
+                port: 8888
