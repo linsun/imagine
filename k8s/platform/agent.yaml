@@ -42,9 +42,7 @@ spec:
   template:
     inline:
       description: >-
-        Platform agent for the imagine KubeCon demo: troubleshoots the cluster,
-        changes the LLM token limit by PR (merged, then synced by Argo CD),
-        and opens fix PRs against linsun/imagine kubecon-na.
+        Platform agent: troubleshoots the cluster and debug issues.
       modelConfig: {name: platform-model}
       tools:
       # Cluster: read-only, no approval.

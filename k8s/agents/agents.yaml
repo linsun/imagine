@@ -14,8 +14,7 @@ spec:
   template:
     inline:
       description: >-
-        The Director: turns a photo of the room into a short film, with a
-        Location Scout and a Director of Photography as crew.
+        The Director: turns a photo into a short film.
   egressPolicyRefs:
   - name: imagine-agents
 ---
@@ -28,7 +27,7 @@ spec:
   harnessRef: {name: imagine}
   template:
     inline:
-      description: Location Scout for the keynote film crew. Enriches the idea into vivid visual wording.
+      description: Enriches the idea into vivid visual wording.
   egressPolicyRefs:
   - name: imagine-agents
 ---
@@ -41,6 +40,6 @@ spec:
   harnessRef: {name: imagine}
   template:
     inline:
-      description: Director of Photography for the keynote film crew. Gives the motion and music direction.
+      description: Director of Photography.
   egressPolicyRefs:
   - name: imagine-agents
