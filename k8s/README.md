@@ -79,9 +79,9 @@ per virtual key). On stage it changes through git:
 1. Ask the platform agent (kagent UI, `kagent/platform`): "raise the token
    limit to 200000".
 2. It edits `k8s/agents/token-limit.yaml` on a `platform-agent/...` branch,
-   opens a PR against `kubecon-na`, and merges it once you approve the merge
-   in the kagent UI.
-3. It asks Argo CD to refresh (`imagine-agents`); Argo CD applies the new
+   opens a PR against `kubecon-na`, and replies with its URL.
+3. You review and merge the PR on GitHub, then tell the agent "merged".
+4. It asks Argo CD to refresh (`imagine-agents`); Argo CD applies the new
    commit and the agentgateway controller pushes it to the proxy. It reads
    the limit back to confirm.
 

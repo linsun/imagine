@@ -21,10 +21,8 @@ What it may do:
 - **Change** the cluster (patch, rollout, scale, delete): each call waits for
   your approval in the kagent UI.
 - **GitHub**: read linsun/imagine, push to a new `platform-agent/...` branch,
-  open a PR against `kubecon-na`. It never pushes to `kubecon-na` itself.
-- **Merge** (`merge_pull_request`): waits for your approval in the kagent UI.
-  Its prompt allows it only for its own token-limit PR; other fix PRs are
-  yours to merge.
+  open a PR against `kubecon-na`. It never pushes to `kubecon-na` itself,
+  and has no merge tool: every PR is yours to review and merge.
 - **Refresh Argo CD** (`k8s_annotate_resource`, no approval): only
   `argocd.argoproj.io/refresh` on the `imagine-agents` Application.
 
@@ -33,12 +31,12 @@ What it may do:
 "raise the token limit to 200000" in the kagent UI:
 
 1. It reads `k8s/agents/token-limit.yaml` on `kubecon-na`, changes only
-   `tokens:` on branch `platform-agent/token-limit-200000`, and opens a PR.
-2. It merges it (squash). **Approve the merge** in the kagent UI.
+   `tokens:` on branch `platform-agent/token-limit-200000`, opens a PR, and
+   replies with the PR URL.
+2. **You merge it** on GitHub, then tell the agent "merged".
 3. It annotates the Argo CD Application `imagine-agents` to refresh, so Argo
-   CD applies the merge commit in seconds rather than on its ~3 minute poll.
-4. It checks the Application is on the merge commit and reads back the live
-   `llm-token-limit`, then replies with the PR URL and the new limit.
+   CD applies the merge commit in seconds rather than on its ~3 minute poll,
+   then reads back the live `llm-token-limit` and replies with it.
 
 If GitHub or Argo CD fails, it offers the old way: a direct patch of
 `llm-token-limit` (approval needed), which leaves git and the cluster apart
@@ -46,8 +44,7 @@ until the next commit. `scripts/k8s-argocd.sh status` shows both sides.
 
 Needs: Argo CD with `k8s/argocd/imagine-agents.yaml` applied
 (`scripts/k8s-argocd.sh`), the `k8s/agents/` layout pushed to `kubecon-na`,
-and a GitHub token that may merge (Contents and Pull requests read & write;
-branch protection on `kubecon-na` that requires reviews would block it).
+and a GitHub token with Contents and Pull requests read & write.
 After the show `kubecon-na` holds the raised limit: ask for "reset it" (200)
 or commit it back.
 

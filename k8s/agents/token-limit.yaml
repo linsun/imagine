@@ -1,31 +1,3 @@
-# :3000 -- THE DEMO KNOB: how many LLM tokens the agents get.
-#
-# A token rate limit on the LLM listener, one bucket per virtual key
-# (`apiKey.name` comes from the metadata in the agw-virtual-key Secret). Input
-# and output tokens both count. A call's tokens are known only once it
-# finishes, so the call that crosses the line still completes; the NEXT call
-# gets a 429.
-#
-# Per HOUR, not per minute: the bucket refills all at once, every unit. Per
-# minute, one call gets through each minute and the turn crawls on for minutes
-# before anyone sees a 429. Per hour, the first call empties it and the next
-# one is refused within seconds, every time. (A rehearsal empties it too: the
-# next hour's first call is refused as well.)
-#
-# On stage:
-#   1. Start low. A film turn (Director + Scout + DP) blows through this, so
-#      the crew is refused mid-turn: "the budget that says no".
-#   2. Raise it by PR: ask the platform agent (../platform/) "raise the token
-#      limit to 200000". It changes `tokens:` below on a branch, opens a PR
-#      against kubecon-na, merges it, and Argo CD (../argocd/) applies it. The
-#      controller pushes it to the proxy: no restart.
-#      Fallback, no git: scripts/token-limit.sh 200000
-#   3. Say "make them dance" again. It goes through.
-#   4. After the show, set it back to 200 on kubecon-na.
-#
-# Replaces the `tripwire` budget in the laptop's ../../gateway/config.yaml (200000 tokens per
-# rolling 24h). The Kubernetes API has no rolling-day window or USD budget
-# (`daily-spend`) in agentgateway v1.6; the longest window is Hours.
 apiVersion: agentgateway.dev/v1alpha1
 kind: AgentgatewayPolicy
 metadata:

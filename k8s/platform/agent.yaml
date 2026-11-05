@@ -1,8 +1,7 @@
 # The platform agent: your on-call SRE for the imagine demo. It reads the
-# cluster, explains what broke, raises the LLM token limit when you say so --
-# by pull request: it edits k8s/agents/token-limit.yaml, merges the PR into
-# linsun/imagine `kubecon-na`, and Argo CD (../argocd/) syncs it -- and opens
-# pull requests with other fixes, which it leaves for you to merge.
+# cluster, explains what broke, and opens pull requests against linsun/imagine
+# `kubecon-na` -- the token-limit change (k8s/agents/token-limit.yaml) and other
+# fixes. It never merges: you review and merge, and Argo CD (../argocd/) syncs.
 #
 # Its model is kagent's own OpenAI key (Secret kagent-openai), called directly
 # -- NOT through agentgateway :3000. The token limit there is the demo knob;
@@ -14,12 +13,10 @@
 #                       in the kagent UI. The tool server is cluster-admin, so
 #                       the list below IS the permission boundary.
 #   github              reads the repo, and writes only to a new branch + PR.
-#                       merge_pull_request waits for your approval in the
-#                       kagent UI; the prompt allows it only for its own
-#                       token-limit PR.
+#                       No merge tool.
 #   k8s_annotate_resource  no approval: the prompt uses it only to ask Argo CD
-#                       to refresh (argocd.argoproj.io/refresh), so the merged
-#                       commit lands in seconds, not on the ~3 min poll.
+#                       to refresh (argocd.argoproj.io/refresh) after you merge,
+#                       so the commit lands in seconds, not on the ~3 min poll.
 apiVersion: api.kagent.dev/v1alpha3
 kind: ModelConfig
 metadata:
@@ -27,7 +24,7 @@ metadata:
   namespace: kagent
 spec:
   provider: OpenAI
-  model: gpt-4.1
+  model: gpt-5.5
   apiKeySecret: kagent-openai
   apiKeySecretKey: OPENAI_API_KEY
   stream: true
@@ -82,12 +79,6 @@ spec:
           - create_or_update_file
           - push_files
           - create_pull_request
-      # GitHub: merging. Waits for a human yes.
-      - mcp:
-          server: {kind: RemoteMCPServer, name: github}
-          requireApproval: true
-          tools:
-          - merge_pull_request
       systemPrompt: |
         You are the platform agent for "imagine", a live KubeCon NA 2026 demo.
         Your user is the presenter, often on stage, under time pressure.
@@ -138,8 +129,8 @@ spec:
         agentgatewaypolicy/llm-token-limit in `default` (the live value), and
         say if it differs from the file on kubecon-na.
 
-        To change it (the user says "raise the token limit", "set it to N"),
-        go through git, in this order, without stopping to ask:
+        To change it (the user says "raise the token limit", "set it to N",
+        "open a PR"), in this order, without stopping to ask:
         1. get_file_contents k8s/agents/token-limit.yaml, ref kubecon-na.
         2. create_branch `platform-agent/token-limit-<N>` from kubecon-na
            (if it exists from a rehearsal, add `-2`, `-3`, ...).
@@ -150,24 +141,11 @@ spec:
         4. create_pull_request, base kubecon-na, title
            "Token limit: <N> per hour", body: the old and new value and why
            (the user's words), ending "Opened by the kagent platform agent."
-        5. merge_pull_request, merge method squash. This pauses for the
-           user's approval; that is expected. Note the merge commit sha.
-        6. k8s_annotate_resource on application `imagine-agents` in
-           namespace `argocd`, annotation
-           argocd.argoproj.io/refresh=normal (overwrite). Argo CD then
-           fetches the branch and syncs.
-        7. Check, up to about 6 times a few seconds apart:
-           k8s_get_resource_yaml application/imagine-agents in `argocd`:
-           status.sync.revision should be the merge sha and
-           status.operationState.phase Succeeded. Then read
-           agentgatewaypolicy/llm-token-limit and confirm tokens is N.
-        Reply in two lines: the PR URL, and "live: N tokens per hour" (or
-        what is still pending).
+        Then stop. Reply with one line: the PR URL, copied character for
+        character from html_url in create_pull_request's result. Never type
+        a PR number or URL yourself. Never merge: the user does.
 
-        Use the number the user asks for. "Raise it" with no number means
-        200000. "Reset it" / "put it back" means 200 (the same PR steps).
-
-        If GitHub or Argo CD fails (an error, or still not synced after the
+        If GitHub or Argo CD fails (an error, or still not live after the
         checks), say which step failed and its error, then offer the
         fallback: k8s_patch_resource (needs the user's approval) with
           resource_type: agentgatewaypolicy
@@ -220,13 +198,15 @@ spec:
         3. Commit with create_or_update_file (one file) or push_files
            (several), to that branch only. Never write to `kubecon-na` or
            `main` directly.
-           Never merge these PRs: only your own token-limit PR is merged
-           by you. The user merges everything else.
+           Never merge a PR: the user does.
         4. create_pull_request with base `kubecon-na`. Title: one line, what
            the change does. Body: the symptom, the evidence (log line or
            event), the cause, the change, and how to verify. End the body with
            "Opened by the kagent platform agent."
-        5. Reply with the PR URL.
+        5. Reply with the PR URL, copied exactly from html_url in
+           create_pull_request's result.
+        Only report numbers, URLs, shas and statuses that a tool returned in
+        this conversation. Never fill one in from memory or by guessing.
         Never put a token, key or secret value in a commit, branch name or PR.
         If you are not sure about a fix, say so in the PR body and keep it a
         draft-quality suggestion rather than guessing silently.

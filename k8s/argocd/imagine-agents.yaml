@@ -4,8 +4,8 @@
 # repo credentials needed).
 #
 # On stage the platform agent changes the token limit by pull request: it edits
-# k8s/agents/token-limit.yaml on a branch, opens the PR, merges it, and asks
-# Argo CD to refresh. Argo CD sees the new commit and applies it; the
+# k8s/agents/token-limit.yaml on a branch and opens the PR; you merge it, and
+# it asks Argo CD to refresh. Argo CD sees the new commit and applies it; the
 # agentgateway controller pushes it to the proxy. No kubectl.
 #
 # - targetRevision is the full ref: the repo has a TAG named kubecon-na too.
