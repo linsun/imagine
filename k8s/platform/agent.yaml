@@ -42,7 +42,7 @@ spec:
   template:
     inline:
       description: >-
-        Platform agent: troubleshoots the cluster and debug issues.
+        Troubleshoots the cluster and debug issues.
       modelConfig: {name: platform-model}
       tools:
       # Cluster: read-only, no approval.

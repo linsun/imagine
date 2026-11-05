@@ -14,7 +14,7 @@ spec:
   template:
     inline:
       description: >-
-        The Director: turns a photo into a short film.
+        Turns a photo into a short film.
   egressPolicyRefs:
   - name: imagine-agents
 ---
