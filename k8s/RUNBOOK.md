@@ -71,8 +71,8 @@ Then in each new terminal, mint a token (ate-api accepts the audience
 
 ```bash
 kubectl --context $CTX -n ate-system create token $USER --audience api.ate-system.svc --duration 12h > ~/.ate-token
-alias kate="kubectl ate --context $CTX --token-file $HOME/.ate-token"
-kate get actors -A          # no warning
+alias ate="kubectl ate --context $CTX --token-file $HOME/.ate-token"
+ate get actors -A          # no warning
 ```
 
 The token expires after 12 hours; mint another. The scripts still run as
