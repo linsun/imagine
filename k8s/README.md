@@ -80,10 +80,10 @@ per virtual key). On stage it changes through git:
    limit to 200000".
 2. It edits `k8s/agents/token-limit.yaml` on a `platform-agent/...` branch,
    opens a PR against `kubecon-na`, and replies with its URL.
-3. You review and merge the PR on GitHub, then tell the agent "merged".
-4. It asks Argo CD to refresh (`imagine`); Argo CD applies the new
-   commit and the agentgateway controller pushes it to the proxy. It reads
-   the limit back to confirm.
+3. You review and merge the PR on GitHub. Argo CD (`imagine`) applies the
+   new commit on its next poll (~3 min), or at once after
+   `scripts/k8s-argocd.sh sync`; the agentgateway controller pushes it to
+   the proxy.
 
 ```bash
 scripts/k8s-argocd.sh status      # Synced? at which commit? the live limit

@@ -13,10 +13,7 @@
 #                       in the kagent UI. The tool server is cluster-admin, so
 #                       the list below IS the permission boundary.
 #   github              reads the repo, and writes only to a new branch + PR.
-#                       No merge tool.
-#   k8s_annotate_resource  no approval: the prompt uses it only to ask Argo CD
-#                       to refresh (argocd.argoproj.io/refresh) after you merge,
-#                       so the commit lands in seconds, not on the ~3 min poll.
+#                       No merge tool: you review and merge every PR.
 apiVersion: api.kagent.dev/v1alpha3
 kind: ModelConfig
 metadata:
@@ -52,7 +49,6 @@ spec:
           - k8s_get_events
           - k8s_get_pod_logs
           - k8s_get_available_api_resources
-          - k8s_annotate_resource
           - helm_list_releases
           - helm_get_release
           - datetime_get_current_time
@@ -141,12 +137,12 @@ spec:
         4. create_pull_request, base kubecon-na, title
            "Token limit: <N> per hour", body: the old and new value and why
            (the user's words), ending "Opened by the kagent platform agent."
-        Then stop. Reply with one line: the PR URL, copied character for
-        character from html_url in create_pull_request's result. Never type
-        a PR number or URL yourself. Never merge: the user does.
+        Then stop. Reply with the PR URL, copied character for character
+        from html_url in create_pull_request's result, and ask the user to
+        review and merge it. Never type a PR number or URL yourself. Never
+        merge: the user does.
 
-        If GitHub or Argo CD fails (an error, or still not live after the
-        checks), say which step failed and its error, then offer the
+        If a GitHub step fails, say which step failed and its error, then offer the
         fallback: k8s_patch_resource (needs the user's approval) with
           resource_type: agentgatewaypolicy
           resource_name: llm-token-limit
@@ -186,8 +182,6 @@ spec:
           a Secret, or anything in kube-system, ate-system or kagent.
         - During a live demo prefer the token-limit PR and restarts; leave
           code fixes for a pull request.
-        - k8s_annotate_resource is ONLY for argocd.argoproj.io/refresh on
-          applications in `argocd`. Nothing else.
 
         # Pull requests (linsun/imagine)
         When a fix belongs in the repo (a manifest, script, config or code):
@@ -204,7 +198,8 @@ spec:
            event), the cause, the change, and how to verify. End the body with
            "Opened by the kagent platform agent."
         5. Reply with the PR URL, copied exactly from html_url in
-           create_pull_request's result.
+           create_pull_request's result, and ask the user to review and
+           merge it.
         Only report numbers, URLs, shas and statuses that a tool returned in
         this conversation. Never fill one in from memory or by guessing.
         Never put a token, key or secret value in a commit, branch name or PR.
