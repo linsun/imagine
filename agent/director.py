@@ -249,6 +249,14 @@ def _tty(text: str) -> None:
     print(text, flush=True)
 
 
+def _known(handle) -> bool:
+    """True if the handle names a file in the store."""
+    try:
+        return bool(handle) and bool(store.path_of(handle))
+    except (KeyError, OSError):
+        return False
+
+
 def _echo(name: str, args: dict, emit=_tty) -> None:
     """One quiet line per step. The prompts are for you, not for the room."""
     icon, label = STEP.get(name, ("\u2022", name))
@@ -395,7 +403,9 @@ class Director:
             args = dict(args)
             # Always paint the NEWEST photo, whatever handle the model chose --
             # so "take another photo" then "make them dance" uses the retake.
-            if not self.last_photo and not args.get("image_handle"):
+            # A handle the store doesn't know ("latest", "photo", a guess)
+            # counts as none.
+            if not self.last_photo and not _known(args.get("image_handle")):
                 # No photo in this session yet: "use my latest photo and make
                 # them fly" in ONE message reads as step 3 alone, and the model
                 # skips fetching it. The inbox's newest photo is the only one

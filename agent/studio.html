@@ -242,10 +242,9 @@ function isPhoto(f) {
 
 async function upload(f, name) {
   if (!f) { step("! not a photo: use a JPEG, PNG or HEIC", true); return; }
-  step("📤 sending " + (name || f.name) + " to the inbox");
   const r = await fetch(API + "photo/upload", {method: "POST", body: f,
                                          headers: {"Content-Type": f.type || "image/heic"}});
-  step(r.ok ? "📥 in the inbox: ask for your latest photo" : "! upload failed (" + r.status + ")", !r.ok);
+  step(r.ok ? "📷 photo loaded" : "! upload failed (" + r.status + ")", !r.ok);
   showing = ""; pollScreen();
 }
 
