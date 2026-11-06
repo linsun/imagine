@@ -220,22 +220,27 @@ PRESERVE_IMAGE = (
 )
 
 PRESERVE_VIDEO = (
-    # The action goes FIRST and is not toned down: "motion should be natural and
-    # gentle" used to lead this prompt, and "fly on a broomstick" came out as
-    # people floating an inch above their seats. Veo weights the opening most.
+    # The first frame is the ORIGINAL photo (not the painted still), so the
+    # likeness is there to keep; this line comes first because Omni weights
+    # the opening most, and a redrawn face is the failure we see most.
+    "The first frame is a real photograph of a real audience. Animate THESE "
+    "people: for the whole clip each person keeps their own face, hair, skin "
+    "tone, build and clothing from that frame. Nobody turns into someone else "
+    "and nobody new appears.\n\n"
+    # The action is not toned down: "motion should be natural and gentle" once
+    # turned "fly on a broomstick" into people floating an inch above their seats.
     "{idea}\n\n"
     "Make that action big, clear and unmistakable, and let it build through the "
-    "whole clip. Keep the SAME people (same faces, same clothing) in the SAME "
-    "room -- people may leave their seats or the ground if the action calls for "
-    "it, but the room itself is not replaced with another place.\n\n"
-    # The first frame is the real audience; the likeness is lost when the
-    # model redraws them mid-motion or the camera leaves them as specks.
-    "The people are the real audience in the first frame. For the whole clip "
-    "each person keeps their own face, hair, skin tone, build and clothing from "
-    "that frame: nobody turns into someone else and nobody new appears. Keep "
-    "their faces turned toward the camera as they move, and keep the camera "
-    "close enough that the faces stay recognisable.\n\n"
-    # The user's request is deliberately NOT quoted back here. Veo treats quoted
+    "whole clip.\n\n"
+    # A camera that flies with the people makes the model redraw every face
+    # from a new angle -- that is where they become strangers. Keep the frame.
+    "Camera: locked off, at the photo's own framing and eye level. It does not "
+    "fly, orbit, pan, tilt or follow anyone. The people move inside this frame: "
+    "if they leave their seats or the ground, they rise from where they are into "
+    "the space above, staying in shot, faces turned to the camera and about as "
+    "large as in the photo.\n\n"
+    "{scene}"
+    # The user's request is deliberately NOT quoted back here. Omni treats quoted
     # text as a line to be SPOKEN -- which is why the film came out with someone
     # saying "make them dance and add some japanese vibe" out loud.
     "Audio: music and ambience only: no dialogue, no narration, no voice-over, "
@@ -243,6 +248,9 @@ PRESERVE_VIDEO = (
     "clapping are welcome, but no intelligible words.\n\n"
     "No text, no captions, no subtitles, no watermarks."
 )
+# The Scout's atmosphere, which used to reach the film through the painted
+# still. The room is the photo's room: add to it, never replace it.
+SCENE = "The scene: {scene}. Add this to the photo's room; never replace the room.\n\n"
 
 
 def _tty(text: str) -> None:
@@ -323,6 +331,9 @@ class Director:
         # The transform ALWAYS uses this, so retaking a photo just
         # works -- the newest one wins, no matter what the model passes.
         self.last_photo = ""
+        # This turn's Scout wording, for the film's prompt (the film starts
+        # from the photo, not the painted still, so it doesn't carry it).
+        self._scene = ""
         # The last credited film, so `publish` can retry without re-rendering.
         self._last_credited: dict = {}
         self._closer = ""
@@ -416,13 +427,21 @@ class Director:
                 self.last_photo = out.get("image_handle", "")
             if self.last_photo:
                 args["image_handle"] = self.last_photo
+            self._scene = (args.get("instruction") or "").strip()
             if args.get("instruction"):
                 args["instruction"] = PRESERVE_IMAGE.format(
                     idea=args["instruction"].strip(), asked=self.user_idea)
-        elif name == "vision_generate_video" and args.get("instruction"):
+        elif name == "vision_generate_video":
             args = dict(args)
-            args["instruction"] = PRESERVE_VIDEO.format(
-                idea=args["instruction"].strip())
+            # Animate the ORIGINAL photo, not the painted still: every edit
+            # redraws the faces a little, and the film then drifts further.
+            # The still is only for the stage ("The cast").
+            if _known(self.last_photo):
+                args["image_handle"] = self.last_photo
+            if args.get("instruction"):
+                args["instruction"] = PRESERVE_VIDEO.format(
+                    idea=args["instruction"].strip(),
+                    scene=SCENE.format(scene=self._scene) if self._scene else "")
 
         if name == "ask_scout":
             return {"scene": await asyncio.to_thread(self._ask, "scout", args["instruction"])}
