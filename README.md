@@ -1,4 +1,4 @@
-# Imagine — the AGNTCon + MCPCon Japan demo
+# Imagine — the KubeCon + CloudNativeCon NA demo
 
 > **Layout.** The demo is the repo root; the old imagine web app is gone (it is
 > still on `main` and in git history). `mcp-server/` is vision-mcp, which the
