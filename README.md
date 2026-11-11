@@ -1,6 +1,6 @@
 # Imagine
 
-Point a camera at the room, describe a film, and an agent crew turns the photo
+Point a camera (phone or drone) at the room, describe a film, and an agent crew turns the photo
 into a short movie with end credits naming the people in the room, then
 publishes it as a GitHub release the audience can take home.
 
